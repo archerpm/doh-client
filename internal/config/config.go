@@ -336,6 +336,9 @@ func (s *Store) Load() (*Config, error) {
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		c := Default()
+		// First run: the target services are intercepted out of the box. An
+		// existing config is never touched; the Rules tab adds presets on demand.
+		c.Rules = DefaultRules()
 		return c, c.Normalize()
 	}
 	if err != nil {
