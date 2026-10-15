@@ -34,6 +34,19 @@ type Provider struct {
 	Geo       bool     `json:"geo"` // provider returns proxy IPs for geo-blocked services
 	Note      string   `json:"note,omitempty"`
 	UseGET    bool     `json:"use_get,omitempty"`
+	// Services names what the provider is known to unblock (informational).
+	Services []string `json:"services,omitempty"`
+	// Lists are domain lists the provider itself publishes. Only built-in providers
+	// have them: Normalize drops them from custom ones, so a saved config can never
+	// make the service fetch an arbitrary URL.
+	Lists []ProviderList `json:"lists,omitempty"`
+}
+
+// ProviderList is one published list of the domains a provider proxies.
+type ProviderList struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"` // https, plain text: one domain per line (hosts-file lines are accepted too)
 }
 
 // Rule routes a domain (and its subdomains) to a specific provider chain.
@@ -71,25 +84,42 @@ func BuiltinProviders() []Provider {
 	return []Provider{
 		{ID: "comss", Name: "Comss.one", URL: "https://dns.comss.one/dns-query",
 			Bootstrap: []string{"195.133.25.16", "83.220.169.155", "212.109.195.93"}, Enabled: true, Builtin: true, Geo: true,
-			Note: "AI-сервисы, обновления Windows, игры; фильтрация рекламы"},
+			Note: "AI-сервисы, обновления Windows, игры; фильтрация рекламы",
+			// comss.ru/page.php?id=7315; the provider publishes no domain list
+			Services: []string{"ChatGPT и Sora", "Microsoft Copilot", "GitHub Copilot", "xAI Grok", "Claude", "Gemini", "Brawl Stars", "Doom Eternal"}},
 		{ID: "geohide", Name: "GeoHide", URL: "https://dns.geohide.ru/dns-query",
 			Bootstrap: []string{"37.230.192.51"}, Enabled: true, Builtin: true, Geo: true,
-			Note: "Notion, Canva, Autodesk, ChatGPT, Grok и др."},
+			Note: "Notion, Canva, Autodesk, ChatGPT, Grok и др.",
+			// github.com/Internet-Helper/GeoHideDNS publishes its lists (updated daily)
+			Services: []string{"AI: ChatGPT, Claude, Gemini, Grok, NotebookLM, Manus, Meta AI", "AI-разработка: Cursor, Windsurf, Trae, Groq, OpenRouter",
+				"Работа: Notion, Canva, Autodesk, Adobe, Atlassian, Slack, Zapier", "Игры: все игры Supercell", "Музыка и видео: Spotify, Crunchyroll"},
+			Lists: []ProviderList{
+				{ID: "google-ai", Name: "Google AI", URL: "https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/main/lists/domains-google.txt"},
+				{ID: "services", Name: "Остальные сервисы", URL: "https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/main/lists/domains.txt"},
+				{ID: "supercell", Name: "Supercell", URL: "https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/main/lists/supercell.txt"},
+			}},
 		{ID: "malw", Name: "dns.malw.link", URL: "https://dns.malw.link/dns-query",
 			Bootstrap: []string{"179.254.166.171", "164.5.224.81"}, Enabled: true, Builtin: true, Geo: true,
-			Note: "Широкий список: AI, Spotify, Twitch, Xbox, JetBrains…; только HTTP/2"},
+			Note:     "Широкий список: AI, Spotify, Twitch, Xbox, JetBrains…; только HTTP/2",
+			Services: []string{"AI-сервисы", "Spotify", "Twitch", "Xbox", "JetBrains", "Linear, Patreon"}},
 		{ID: "malw-cf", Name: "dns.malw.link (Cloudflare)", URL: "https://5u35p8m9i7.cloudflare-gateway.com/dns-query",
 			Bootstrap: []string{"162.159.36.5", "162.159.36.20"}, Enabled: true, Builtin: true, Geo: true,
-			Note: "Тот же malw.link через Cloudflare Gateway; некоторые провайдеры блокируют CF"},
+			Note:     "Тот же malw.link через Cloudflare Gateway; некоторые провайдеры блокируют CF",
+			Services: []string{"AI-сервисы", "Spotify", "Twitch", "Xbox", "JetBrains", "Linear, Patreon"}},
 		{ID: "dnsai", Name: "DNS-AI", URL: "https://dns.dns-ai.ru/dns-query",
 			Bootstrap: []string{"192.144.59.14", "186.246.49.127"}, Enabled: true, Builtin: true, Geo: true,
-			Note: "Только AI-сервисы; работает только для IP из РФ/РБ"},
+			Note: "Только AI-сервисы; работает только для IP из РФ/РБ",
+			// dns-ai.ru: the AI list changes with the vendors' addresses and is deliberately not published
+			Services: []string{"AI-сервисы (Anthropic, ChatGPT и др.); список не публикуется"}},
 		{ID: "mafioznik", Name: "Mafioznik", URL: "https://dns.mafioznik.xyz/dns-query",
 			Bootstrap: []string{"103.27.157.38", "103.27.157.100"}, Enabled: false, Builtin: true, Geo: true,
-			Note: "Только HTTP/2; часть доменов (chatgpt.com, notion.so) отдаёт 0.0.0.0"},
+			Note:     "Только HTTP/2; часть доменов (chatgpt.com, notion.so) отдаёт 0.0.0.0",
+			Services: []string{"xAI Grok", "Linear (частично)"}},
 		{ID: "bezmezhau", Name: "Bezmezhau", URL: "https://dns.bezmezhau.com/dns-query",
 			Bootstrap: []string{"143.20.64.55"}, Enabled: false, Builtin: true, Geo: true,
-			Note: "ChatGPT, Spotify, YouTube, Netflix и др.; сервис для Беларуси (bezmezhau.com)"},
+			Note: "ChatGPT, Spotify, YouTube, Netflix и др.; сервис для Беларуси (bezmezhau.com)",
+			// bezmezhau.com/supported-services
+			Services: []string{"ChatGPT", "Claude", "Gemini", "Brawl Stars", "Spotify", "Netflix", "YouTube", "Instagram и Facebook", "Discord", "Twitter / X", "TikTok", "Reddit"}},
 		{ID: "cloudflare", Name: "Cloudflare", URL: "https://cloudflare-dns.com/dns-query",
 			Bootstrap: []string{"1.1.1.1", "1.0.0.1"}, Enabled: true, Builtin: true,
 			Note: "Обычный DoH без обхода геоблокировок"},
@@ -175,6 +205,9 @@ func (c *Config) Normalize() error {
 	seen := map[string]bool{}
 	for i := range c.Providers {
 		p := &c.Providers[i]
+		if !p.Builtin {
+			p.Lists = nil // only built-in providers may name a list URL
+		}
 		if err := ValidateProvider(p); err != nil {
 			return err
 		}

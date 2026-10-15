@@ -138,6 +138,11 @@ func TestDaemonAPIEndToEnd(t *testing.T) {
 		t.Fatalf("provider test must be refused while the bypass is on: %v", err)
 	}
 
+	// provider lists come from the built-in definitions only: unknown ones are refused
+	if _, err := cl.ProviderList("cloudflare", "x"); err == nil || !strings.Contains(err.Error(), "нет такого") {
+		t.Fatalf("unknown provider list must be refused: %v", err)
+	}
+
 	// bad config rejected, old config kept
 	bad := cfg
 	bad.Listen = []string{"nonsense"}

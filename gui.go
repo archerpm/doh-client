@@ -97,6 +97,11 @@ func (a *App) SetEnabled(on bool) (daemon.Status, error) {
 
 func (a *App) TestDomain(domain string) ([]daemon.ProbeResult, error) { return a.cl.Test(domain) }
 
+// ProviderList fetches the domain list a built-in provider publishes.
+func (a *App) ProviderList(provider, list string) (daemon.ProviderListResult, error) {
+	return a.cl.ProviderList(provider, list)
+}
+
 // TestProviders checks the bypass of every provider (only while the bypass is off).
 func (a *App) TestProviders() ([]daemon.ProviderTest, error) { return a.cl.TestProviders() }
 

@@ -58,6 +58,7 @@ func NewServer(d *daemon.Daemon, addr, tokenFile, owner string) (*Server, error)
 	mux.HandleFunc("POST /v1/reapply-dns", s.reapplyDNS)
 	mux.HandleFunc("POST /v1/test", s.test)
 	mux.HandleFunc("POST /v1/test-providers", s.testProviders)
+	mux.HandleFunc("POST /v1/provider-list", s.providerList)
 	mux.HandleFunc("POST /v1/diagnose", s.diagnose)
 	mux.HandleFunc("GET /v1/log", s.log)
 	mux.HandleFunc("POST /v1/flush", s.flush)
@@ -199,6 +200,27 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+func (s *Server) providerList(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		List     string `json:"list"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	res, err := s.d.ProviderList(r.Context(), req.Provider, req.List)
+	if errors.Is(err, daemon.ErrNoProviderList) {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, res)
+}
+
 func (s *Server) testProviders(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1))
 	if err != nil || len(body) != 0 {
@@ -330,6 +352,12 @@ func (c *Client) SetEnabled(on bool) (st daemon.Status, err error) {
 }
 func (c *Client) Test(domain string) (r []daemon.ProbeResult, err error) {
 	err = c.do("POST", "/v1/test", map[string]string{"domain": domain}, &r)
+	return
+}
+
+// ProviderList fetches one domain list a built-in provider publishes.
+func (c *Client) ProviderList(provider, list string) (r daemon.ProviderListResult, err error) {
+	err = c.do("POST", "/v1/provider-list", map[string]string{"provider": provider, "list": list}, &r)
 	return
 }
 
