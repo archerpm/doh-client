@@ -122,6 +122,8 @@ async function refresh() {
   if (!S.cfg) await loadConfig();
   updateProviderHealth();
   updateProvTestUI();
+  if (!S.svc.loaded) { S.svc.loaded = true; call("ServiceTest").then((st) => { applySvc(st); updateSvcUI(); renderProviders(); }).catch(() => { S.svc.loaded = false; }); }
+  updateSvcUI();
   const sw = $("#power");
   sw.setAttribute("aria-checked", String(s.active));
   $(".switch-lbl", sw).textContent = s.active ? "Включено" : "Включить";
@@ -444,6 +446,76 @@ $("#provTest").addEventListener("click", async () => {
   }
 });
 
+// ---------- live check of the services each provider proxies ----------
+S.svc = { running: false, provider: "", done: 0, total: 0, error: "", results: {}, loaded: false, timer: 0 };
+
+function applySvc(st) {
+  S.svc.running = !!st.running;
+  S.svc.provider = st.provider || "";
+  S.svc.done = st.done || 0;
+  S.svc.total = st.total || 0;
+  S.svc.error = st.error || "";
+  S.svc.results = Object.fromEntries((st.results || []).map((r) => [r.provider, r]));
+  S.svc.loaded = true;
+  if (S.svc.running && !S.svc.timer) S.svc.timer = setInterval(pollSvc, 1500);
+  if (!S.svc.running && S.svc.timer) { clearInterval(S.svc.timer); S.svc.timer = 0; }
+}
+
+async function pollSvc() {
+  const was = S.svc.running;
+  try { applySvc(await call("ServiceTest")); } catch { return; }
+  updateSvcUI();
+  if (was && !S.svc.running) {
+    renderProviders();
+    if (S.svc.error) toast("Проверка сервисов прервана: " + S.svc.error, true);
+    else toast("Проверка сервисов завершена");
+  }
+}
+
+function updateSvcUI() {
+  const btn = $("#svcTest"), hint = $("#svcHint");
+  if (!btn) return;
+  const active = !!S.state?.status?.active, run = S.svc.running;
+  btn.disabled = !S.cfg || (!run && active);
+  btn.textContent = run ? "Остановить" : "Проверить сервисы";
+  const pct = S.svc.total ? Math.min(99, Math.floor((S.svc.done / S.svc.total) * 100)) : 0;
+  const times = Object.values(S.svc.results).map((r) => new Date(r.at).getTime()).filter(Boolean);
+  hint.textContent = run ? `Проверяем сервисы${S.svc.provider ? " у " + (prov(S.svc.provider)?.name || S.svc.provider) : ""}: ${pct}%. Это займёт пару минут.`
+    : active ? "Выключите обход, чтобы проверить сервисы."
+    : S.svc.error ? "Проверка прервана: " + S.svc.error
+    : times.length ? `Проверено в ${new Date(Math.max(...times)).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}. Результат смотрите в «Что поддерживает» у провайдера.`
+    : "";
+  $$("button.svc-run").forEach((b) => { b.disabled = !S.cfg || run || active; });
+}
+
+async function startSvcTest(provider) {
+  if (S.svc.running) {
+    try { applySvc(await call("CancelServiceTest")); } catch (err) { toast(errText(err), true); }
+    updateSvcUI();
+    return;
+  }
+  if (S.state?.status?.active) return;
+  try { applySvc(await call("StartServiceTest", provider || "")); } catch (err) { toast(errText(err), true); return; }
+  updateSvcUI();
+}
+$("#svcTest").addEventListener("click", () => startSvcTest(""));
+
+// what the check found for a provider next to the built-in data
+function svcDetail(p) {
+  const r = S.svc.results[p.id], rows = [];
+  if (r) {
+    const at = new Date(r.at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    rows.push(`<div class="pd-row"><b>Проверено у вас, ${esc(at)} (${r.services.length}):</b> ${r.services.map((s) => `<span class="chip live">${esc(s)}</span>`).join("") || '<span class="muted">ни один сервис не подтверждён</span>'}</div>`);
+    const base = new Set(p.tested || []), now = new Set(r.services);
+    const added = r.services.filter((s) => !base.has(s)), gone = (p.tested || []).filter((s) => !now.has(s));
+    if (p.tested?.length && (added.length || gone.length)) rows.push(`<div class="pd-row muted">Отличия от данных программы: ${added.length ? "появились " + added.map(esc).join(", ") : ""}${added.length && gone.length ? "; " : ""}${gone.length ? "не подтвердились " + gone.map(esc).join(", ") : ""}.</div>`);
+    if (r.errors * 5 > r.hosts) rows.push(`<div class="pd-row muted">Провайдер не ответил на ${r.errors} из ${r.hosts} запросов — результат неполный, повторите проверку.</div>`);
+  }
+  const busy = S.svc.running;
+  rows.push(`<div class="pd-row"><button type="button" class="btn sm svc-run" data-id="${esc(p.id)}" ${busy || S.state?.status?.active || !S.cfg ? "disabled" : ""}>${busy && S.svc.provider === p.id ? "Проверяем…" : r ? "Проверить сервисы ещё раз" : "Проверить сервисы"}</button></div>`);
+  return rows.join("");
+}
+
 // ---------- what a provider supports (under a disclosure) ----------
 S.provLists = {}; // provider id -> { listId: { name, domains } }, fetched in this session
 S.provSel = {};   // provider id -> Set of selected list ids
@@ -489,6 +561,7 @@ function provDetail(p) {
     parts.push(`<div class="pd-row"><b>Подтверждено тестами (${p.tested.length}):</b> ${p.tested.map((s) => `<span class="chip tested">${esc(s)}</span>`).join("")}</div>`);
     parts.push(`<div class="pd-row muted">Получено на основе реальных проверок${d ? ` от ${esc(d)}` : ""}: мы спросили провайдера про хосты каждого сервиса (по спискам GeoHide и нашим наборам) и сравнили ответы с обычным DNS. Сервис засчитан, если не менее половины его хостов получили адреса прокси провайдера; нестабильные ответы не засчитывались. Сервисов вне этого перечня провайдер может поддерживать больше.</div>`);
   }
+  if (p.geo) parts.push(svcDetail(p));
   const t = S.provTest[p.id];
   if (t) parts.push(`<div class="pd-row"><b>Последняя проверка:</b> ${esc(t.detail)}</div>`);
   if (p.lists?.length) {
@@ -546,8 +619,8 @@ $("#provList").addEventListener("change", (e) => {
   if (c.checked) set.add(c.dataset.list); else set.delete(c.dataset.list);
 });
 $("#provList").addEventListener("click", (e) => {
-  const rb = e.target.closest?.("button.pl-refresh"), ab = e.target.closest?.("button.pl-add");
-  if (rb) refreshProviderLists(rb.dataset.id); else if (ab) addProviderDomains(ab.dataset.id);
+  const rb = e.target.closest?.("button.pl-refresh"), ab = e.target.closest?.("button.pl-add"), sb = e.target.closest?.("button.svc-run");
+  if (rb) refreshProviderLists(rb.dataset.id); else if (ab) addProviderDomains(ab.dataset.id); else if (sb) startSvcTest(sb.dataset.id);
 });
 
 function renderProviders() {

@@ -112,6 +112,10 @@
           <button type="button" class="btn" id="provTest" title="Спросим каждого провайдера про домены ChatGPT, Claude и Grok и сравним ответы с обычным DNS. Работает только при выключенном обходе.">Проверить обход</button>
           <span id="provTestHint" class="muted" role="status" aria-live="polite"></span>
         </div>
+        <div class="provtest">
+          <button type="button" class="btn" id="svcTest" title="Спросим каждого обходного провайдера про хосты известных сервисов (ChatGPT, Claude, Notion и других) и покажем, что он проксирует именно у вас. Работает только при выключенном обходе, занимает пару минут.">Проверить сервисы</button>
+          <span id="svcHint" class="muted" role="status" aria-live="polite"></span>
+        </div>
         <div id="provList" class="plist"></div>
       </section>
       <section class="block">

@@ -388,3 +388,4 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 16
 .popup-card h2 { margin: 0; font-size: 18px; }
 .popup-card p { margin: 0 0 8px; white-space: pre-wrap; }
 .popup-card button { align-self: flex-end; }
+.chip.live { border-color: color-mix(in srgb, var(--accent) 55%, var(--rule)); }
