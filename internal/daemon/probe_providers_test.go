@@ -5,16 +5,21 @@ import (
 	"errors"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/archerpm/doh-client/internal/config"
 	"github.com/archerpm/doh-client/internal/doh"
+	"github.com/archerpm/doh-client/internal/probe"
 	"github.com/archerpm/doh-client/internal/resolver"
 	"github.com/miekg/dns"
 )
 
-var origProbeUpstream = newProbeUpstream
+var (
+	origProbeUpstream = newProbeUpstream
+	origProbeReach    = probeReach
+)
 
 func TestClassifyCanary(t *testing.T) {
 	ref := map[netip.Addr]bool{netip.MustParseAddr("198.51.100.1"): true}
@@ -61,6 +66,9 @@ func TestSummarizeProvider(t *testing.T) {
 		outcomes   []canaryOutcome
 	}{
 		{"all proxied", "works", o("bypass", "bypass", "bypass")},
+		{"proxy answers but unreachable", "unreachable", o("unreachable", "unreachable", "unreachable")},
+		{"half reachable", "unreachable", o("bypass", "unreachable", "real")},
+		{"one reachable only", "fails", o("bypass", "real", "real")},
 		{"two of three", "works", o("bypass", "bypass", "real")},
 		{"one of three", "fails", o("bypass", "real", "real")},
 		{"all real", "fails", o("real", "real", "real")},
@@ -95,6 +103,44 @@ func TestDeclaredBypass(t *testing.T) {
 		if got != tc.expect || detail == "" {
 			t.Errorf("geo=%v %s: %q (%q), want %q", tc.geo, tc.status, got, detail, tc.expect)
 		}
+	}
+}
+
+func TestCheckReach(t *testing.T) {
+	t.Cleanup(func() { probeReach = origProbeReach })
+	var dialed []string
+	probeReach = func(_ context.Context, provider, domain string, ip netip.Addr) probe.Connection {
+		dialed = append(dialed, ip.String())
+		if ip.String() == "192.0.2.2" {
+			return probe.Connection{TLS: "ok"}
+		}
+		return probe.Connection{TLS: "failed", Error: "ошибка TLS: timeout"}
+	}
+	a := func(s ...string) []netip.Addr {
+		var out []netip.Addr
+		for _, v := range s {
+			out = append(out, netip.MustParseAddr(v))
+		}
+		return out
+	}
+	// the second address connects: the bypass stands
+	if got := checkReach(context.Background(), time.Second, "p", canaryOutcome{Domain: "x.test", Kind: "bypass", Addrs: a("192.0.2.1", "192.0.2.2")}); got.Kind != "bypass" {
+		t.Errorf("reachable second address: %+v", got)
+	}
+	// none connects: unreachable, with the reason
+	got := checkReach(context.Background(), time.Second, "p", canaryOutcome{Domain: "x.test", Kind: "bypass", Addrs: a("192.0.2.1", "192.0.2.3")})
+	if got.Kind != "unreachable" || !strings.Contains(got.Err, "192.0.2.3") {
+		t.Errorf("unreachable proxy: %+v", got)
+	}
+	// anything but a bypass is never dialled
+	dialed = nil
+	for _, k := range []string{"real", "blocked", "error", "noref"} {
+		if got := checkReach(context.Background(), time.Second, "p", canaryOutcome{Domain: "x.test", Kind: k, Addrs: a("192.0.2.1")}); got.Kind != k {
+			t.Errorf("%s changed to %s", k, got.Kind)
+		}
+	}
+	if len(dialed) != 0 {
+		t.Errorf("dialled %v for non-bypass outcomes", dialed)
 	}
 }
 
@@ -135,13 +181,20 @@ func TestTestProviders(t *testing.T) {
 		config.Provider{ID: "good", Name: "Good", URL: "https://good.test/dns-query", Geo: true},
 		config.Provider{ID: "plain", Name: "Plain", URL: "https://plain.test/dns-query"},
 		config.Provider{ID: "dead", Name: "Dead", URL: "https://dead.test/dns-query", Geo: true},
-		config.Provider{ID: "cdn", Name: "CDN", URL: "https://cdn.test/dns-query"}, // differs from the reference but is no bypass provider
+		config.Provider{ID: "cdn", Name: "CDN", URL: "https://cdn.test/dns-query"},                  // differs from the reference but is no bypass provider
+		config.Provider{ID: "stuck", Name: "Stuck", URL: "https://stuck.test/dns-query", Geo: true}, // proxy addresses that do not connect
 	)
-	t.Cleanup(func() { newProbeUpstream = origProbeUpstream })
+	t.Cleanup(func() { newProbeUpstream = origProbeUpstream; probeReach = origProbeReach })
+	probeReach = func(_ context.Context, provider, _ string, _ netip.Addr) probe.Connection {
+		if provider == "stuck" {
+			return probe.Connection{TCP: "failed", TLS: "skipped", Error: "ошибка TCP: i/o timeout"}
+		}
+		return probe.Connection{TCP: "ok", TLS: "ok"}
+	}
 	newProbeUpstream = func(p config.Provider, _ *doh.Bootstrap, _ time.Duration) (resolver.Exchanger, error) {
 		return exchangeFunc(func(_ context.Context, q *dns.Msg) (*dns.Msg, error) {
 			switch p.ID {
-			case "good", "cdn":
+			case "good", "cdn", "stuck":
 				return testAnswer(q, "192.0.2.10"), nil
 			case "plain":
 				return testAnswer(q, "198.51.100.1"), nil // same as the UDP reference
@@ -158,7 +211,7 @@ func TestTestProviders(t *testing.T) {
 	want := map[string]struct {
 		status string
 		works  bool
-	}{"good": {"works", true}, "plain": {"fails", false}, "dead": {"error", false}, "cdn": {"fails", false}}
+	}{"good": {"works", true}, "plain": {"fails", false}, "dead": {"error", false}, "cdn": {"fails", false}, "stuck": {"unreachable", false}}
 	seen := 0
 	for _, r := range got {
 		w, ok := want[r.Provider]

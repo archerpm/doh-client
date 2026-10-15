@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/archerpm/doh-client/internal/config"
 	"github.com/archerpm/doh-client/internal/doh"
+	"github.com/archerpm/doh-client/internal/probe"
 	"github.com/archerpm/doh-client/internal/resolver"
 	"github.com/miekg/dns"
 )
@@ -25,7 +27,7 @@ type ProviderTest struct {
 	Provider string `json:"provider"`
 	Name     string `json:"name"`
 	Geo      bool   `json:"geo"`
-	Status   string `json:"status"` // works | fails | error | unknown
+	Status   string `json:"status"` // works | fails | unreachable | error | unknown
 	Works    bool   `json:"works"`
 	Detail   string `json:"detail"`
 	MS       int64  `json:"ms"` // median latency of the answered probes
@@ -40,17 +42,49 @@ var newProbeUpstream = func(p config.Provider, boot *doh.Bootstrap, timeout time
 	return doh.New(doh.Options{ID: p.ID, URL: p.URL, Bootstrap: p.Bootstrap, UseGET: p.UseGET, Resolver: boot, Timeout: timeout})
 }
 
+// probeReach checks that the address a provider returned really accepts a TLS
+// connection for the domain (replaceable in tests). A DNS answer that points at a
+// proxy this network cannot reach is not a working bypass.
+var probeReach = func(ctx context.Context, provider, domain string, ip netip.Addr) probe.Connection {
+	return probe.Connect(ctx, &net.Dialer{}, nil, provider, domain, ip)
+}
+
 // canaryOutcome is the result of asking one provider for one canary domain.
 type canaryOutcome struct {
 	Domain string
-	Kind   string // bypass | real | blocked | error | noref
+	Kind   string // bypass | unreachable | real | blocked | error | noref
 	Err    string
 	MS     int64
+	Addrs  []netip.Addr
+}
+
+// checkReach turns a "bypass" outcome into "unreachable" when none of the
+// returned addresses (at most two per family) completes a TLS handshake.
+func checkReach(ctx context.Context, timeout time.Duration, provider string, o canaryOutcome) canaryOutcome {
+	if o.Kind != "bypass" {
+		return o
+	}
+	var strs []string
+	for _, a := range o.Addrs {
+		strs = append(strs, a.String())
+	}
+	var lastErr string
+	for _, ip := range probe.Addresses(strs) {
+		cctx, cancel := context.WithTimeout(ctx, timeout)
+		c := probeReach(cctx, provider, o.Domain, ip)
+		cancel()
+		if c.TLS == "ok" {
+			return o
+		}
+		lastErr = fmt.Sprintf("%s: %s", ip, c.Error)
+	}
+	o.Kind, o.Err = "unreachable", lastErr
+	return o
 }
 
 // classifyCanary compares the provider's answer with the UDP reference set.
 func classifyCanary(domain string, ref map[netip.Addr]bool, addrs []netip.Addr, rcode int, err error, ms int64) canaryOutcome {
-	o := canaryOutcome{Domain: domain, MS: ms}
+	o := canaryOutcome{Domain: domain, MS: ms, Addrs: addrs}
 	switch {
 	case err != nil:
 		o.Kind, o.Err = "error", err.Error()
@@ -84,13 +118,18 @@ func classifyCanary(domain string, ref map[netip.Addr]bool, addrs []netip.Addr, 
 
 // summarizeProvider turns the canary outcomes into the provider's verdict.
 func summarizeProvider(outcomes []canaryOutcome) (status, detail string, ms int64) {
-	var proxied, real, blocked, errs, noref []string
+	var proxied, unreachable, real, blocked, errs, noref []string
 	var lat []int64
-	var firstErr string
+	var firstErr, firstUnreachable string
 	for _, o := range outcomes {
 		switch o.Kind {
 		case "bypass":
 			proxied = append(proxied, o.Domain)
+		case "unreachable":
+			unreachable = append(unreachable, o.Domain)
+			if firstUnreachable == "" {
+				firstUnreachable = o.Err
+			}
 		case "real":
 			real = append(real, o.Domain)
 		case "blocked":
@@ -118,9 +157,14 @@ func summarizeProvider(outcomes []canaryOutcome) (status, detail string, ms int6
 	case len(noref) == total-len(errs) && len(proxied) == 0:
 		return "unknown", "не удалось получить эталонные адреса обычного DNS", ms
 	case len(proxied) >= providerTestMinProxied:
-		return "works", fmt.Sprintf("адреса прокси отдал для %d из %d доменов: %s", len(proxied), total, strings.Join(proxied, ", ")), ms
+		return "works", fmt.Sprintf("адреса прокси отдал для %d из %d доменов, TLS-соединение установлено: %s", len(proxied), total, strings.Join(proxied, ", ")), ms
+	case len(proxied)+len(unreachable) >= providerTestMinProxied:
+		return "unreachable", fmt.Sprintf("провайдер отдаёт адреса прокси (%d из %d доменов), но соединение с ними из вашей сети не устанавливается: %s (%s)", len(proxied)+len(unreachable), total, strings.Join(unreachable, ", "), firstUnreachable), ms
 	}
 	parts := []string{fmt.Sprintf("обход подтверждён только для %d из %d доменов", len(proxied), total)}
+	if len(unreachable) > 0 {
+		parts = append(parts, "прокси недоступен: "+strings.Join(unreachable, ", "))
+	}
 	if len(real) > 0 {
 		parts = append(parts, "настоящие адреса: "+strings.Join(real, ", "))
 	}
@@ -198,7 +242,7 @@ func (d *Daemon) TestProviders(ctx context.Context) ([]ProviderTest, error) {
 					} else if err == nil {
 						err = errors.New("пустой ответ")
 					}
-					outcomes[j] = classifyCanary(dom, refs[j], addrs, rcode, err, ms)
+					outcomes[j] = checkReach(ctx, cfg.Timeout(), p.ID, classifyCanary(dom, refs[j], addrs, rcode, err, ms))
 				}()
 			}
 			cwg.Wait()

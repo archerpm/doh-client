@@ -391,7 +391,7 @@ function save(mut, okMsg) {
 function provTestTag(id) {
   const r = S.provTest[id];
   if (!r) return "";
-  const [cls, txt] = r.status === "works" ? ["ok", "работает"] : r.status === "unknown" ? ["na", "не проверено"] : ["bad", "не работает"];
+  const [cls, txt] = r.status === "works" ? ["ok", "работает"] : r.status === "unknown" ? ["na", "не проверено"] : r.status === "unreachable" ? ["bad", "прокси недоступен"] : ["bad", "не работает"];
   const ms = r.ms && r.status !== "error" ? ` · ${r.ms} мс` : "";
   return `<span class="tag res ${cls}" title="${esc(r.detail + ms)}">${txt}</span>`;
 }
