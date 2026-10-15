@@ -425,6 +425,107 @@ $("#provTest").addEventListener("click", async () => {
   }
 });
 
+// ---------- what a provider supports (under a disclosure) ----------
+S.provLists = {}; // provider id -> { listId: { name, domains } }, fetched in this session
+S.provSel = {};   // provider id -> Set of selected list ids
+S.provOpen = new Set();
+S.provBusy = new Set();
+
+// a rule (or list entry) for "example.com" also matches every subdomain
+function coversHost(set, host) {
+  for (let h = host; h;) {
+    if (set.has(h)) return true;
+    const i = h.indexOf(".");
+    if (i < 0) return false;
+    h = h.slice(i + 1);
+  }
+  return false;
+}
+
+function listSummary(p) {
+  const fetched = S.provLists[p.id];
+  if (!fetched) return null;
+  const rules = new Set((S.cfg?.rules || []).map((r) => r.domain));
+  const all = new Set(), fresh = new Set(), lines = [];
+  for (const l of p.lists || []) {
+    const f = fetched[l.id];
+    if (!f) continue;
+    const news = f.domains.filter((d) => !coversHost(rules, d));
+    news.forEach((d) => fresh.add(d));
+    f.domains.forEach((d) => all.add(d));
+    lines.push(`${l.name}: ${fmt.format(f.domains.length)} ${plural(f.domains.length, "домен", "домена", "доменов")}, новых для ваших правил: ${fmt.format(news.length)}`);
+  }
+  const preset = (S.presets || []).map((ps) => {
+    const n = ps.domains.filter((d) => coversHost(all, d)).length;
+    return n ? `${ps.name}: ${n} из ${ps.domains.length}` : "";
+  }).filter(Boolean);
+  return { lines, fresh: [...fresh], preset };
+}
+
+function provDetail(p) {
+  const parts = [];
+  if (p.services?.length) parts.push(`<div class="pd-row"><b>Поддерживает:</b> ${p.services.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div>`);
+  const t = S.provTest[p.id];
+  if (t) parts.push(`<div class="pd-row"><b>Последняя проверка:</b> ${esc(t.detail)}</div>`);
+  if (p.lists?.length) {
+    const sel = (S.provSel[p.id] ??= new Set(p.lists.map((l) => l.id)));
+    parts.push(`<div class="pd-row"><b>Опубликованные списки:</b> ${p.lists.map((l) => `<label class="chk sm"><input type="checkbox" class="pl-sel" data-id="${esc(p.id)}" data-list="${esc(l.id)}" ${sel.has(l.id) ? "checked" : ""}> ${esc(l.name)}</label>`).join(" ")}</div>`);
+    const busy = S.provBusy.has(p.id), sum = listSummary(p);
+    parts.push(`<div class="pd-row"><button type="button" class="btn sm pl-refresh" data-id="${esc(p.id)}" ${busy || !S.cfg ? "disabled" : ""}>${busy ? "Загружаем…" : sum ? "Обновить списки" : "Загрузить списки"}</button>${sum && sum.fresh.length ? `<button type="button" class="btn sm primary pl-add" data-id="${esc(p.id)}">Добавить ${fmt.format(sum.fresh.length)} ${plural(sum.fresh.length, "домен", "домена", "доменов")} в правила</button>` : ""}</div>`);
+    if (sum) parts.push(`<div class="pd-row muted">${sum.lines.map(esc).join("<br>")}${sum.fresh.length ? "" : "<br>Все домены списка уже покрыты вашими правилами."}${sum.preset.length ? `<br>Покрытие наборов: ${sum.preset.map(esc).join("; ")}` : ""}</div>`);
+  } else if (p.geo) {
+    parts.push(`<div class="pd-row muted">Провайдер не публикует список доменов, обновлять нечего. Наборы правил обновляются вместе с программой.</div>`);
+  }
+  if (!parts.length) return "";
+  return `<details class="pdetail" data-id="${esc(p.id)}" ${S.provOpen.has(p.id) ? "open" : ""}><summary>Что поддерживает</summary>${parts.join("")}</details>`;
+}
+
+async function refreshProviderLists(id) {
+  const p = prov(id);
+  if (!p?.lists?.length || S.provBusy.has(id)) return;
+  const sel = [...(S.provSel[id] ?? p.lists.map((l) => l.id))];
+  if (!sel.length) return toast("Отметьте хотя бы один список", true);
+  S.provBusy.add(id);
+  renderProviders();
+  const got = {};
+  for (const lid of sel) {
+    try {
+      const r = await call("ProviderList", id, lid);
+      got[lid] = { name: r.name, domains: r.domains || [] };
+    } catch (err) { toast(errText(err), true); }
+  }
+  S.provBusy.delete(id);
+  if (Object.keys(got).length) S.provLists[id] = got;
+  renderProviders();
+}
+
+async function addProviderDomains(id) {
+  const p = prov(id), sum = p && listSummary(p);
+  if (!sum?.fresh.length) return;
+  let added = 0;
+  const ok = await save((c) => {
+    const have = new Set(c.rules.map((r) => r.domain));
+    for (const d of sum.fresh) if (!coversHost(have, d)) { c.rules.push({ domain: d, providers: [], enabled: true }); have.add(d); added++; }
+  });
+  if (ok) toast(`Добавлено правил: ${added}`);
+  renderAll();
+}
+
+$("#provList").addEventListener("toggle", (e) => {
+  const d = e.target.closest?.("details.pdetail");
+  if (d) { if (d.open) S.provOpen.add(d.dataset.id); else S.provOpen.delete(d.dataset.id); }
+}, true);
+$("#provList").addEventListener("change", (e) => {
+  const c = e.target.closest?.("input.pl-sel");
+  if (!c) return;
+  const set = (S.provSel[c.dataset.id] ??= new Set());
+  if (c.checked) set.add(c.dataset.list); else set.delete(c.dataset.list);
+});
+$("#provList").addEventListener("click", (e) => {
+  const rb = e.target.closest?.("button.pl-refresh"), ab = e.target.closest?.("button.pl-add");
+  if (rb) refreshProviderLists(rb.dataset.id); else if (ab) addProviderDomains(ab.dataset.id);
+});
+
 function renderProviders() {
   if (!S.cfg) return;
   const list = $("#provList");
@@ -439,14 +540,14 @@ function renderProviders() {
       <input type="radio" name="active" ${p.enabled ? "checked" : ""} data-fk="prov:${esc(p.id)}" aria-label="Использовать ${esc(p.name)}">
       <span class="sw"></span>
       <div><span class="nm">${esc(p.name)}</span>${p.geo ? '<span class="tag geo">обход</span>' : ""}${p.builtin ? "" : '<span class="tag">свой</span>'}${provTestTag(p.id)}
-        <div class="url">${esc(p.url)}</div>${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}</div>
+        <div class="url">${esc(p.url)}</div>${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}${provDetail(p)}</div>
       <div class="lat ${h && !h.ok && h.checked ? "bad" : ""}" data-id="${esc(p.id)}">${lat}</div>
       <div>${p.builtin ? "" : `<button class="icon-btn" aria-label="Удалить ${esc(p.name)}">✕</button>`}</div>`;
     $("input", row).addEventListener("change", (e) => {
       if (!e.target.checked) return;
       save((c) => { c.active_provider = p.id; }, `Туннель: ${p.name}`).then(renderAll);
     });
-    $("button", row)?.addEventListener("click", () => {
+    $(".icon-btn", row)?.addEventListener("click", () => {
       save((c) => {
         // checked against the latest saved config, not the stale render
         if (c.active_provider === p.id) throw new Error("Это активный туннель: сначала выберите другой");
