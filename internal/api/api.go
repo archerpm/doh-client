@@ -267,6 +267,9 @@ func NewClient(addr, tokenFile string) *Client {
 	return &Client{Addr: addr, TokenFile: tokenFile, hc: &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{Proxy: nil}}}
 }
 
+// ErrOldService: the running service does not know this request, so it is older than the app.
+var ErrOldService = errors.New("служба старой версии и не знает этой команды: переустановите её (Настройки → «Переустановить службу»)")
+
 // ErrNoService means the service is not running / not installed.
 var ErrNoService = errors.New("служба не запущена")
 
@@ -322,6 +325,9 @@ func (c *Client) do(method, path string, in, out any) error {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			if json.Unmarshal(b, &e) == nil && e.Error != "" {
 				return errors.New(e.Error)
+			}
+			if resp.StatusCode == http.StatusNotFound { // the mux answers with plain text: no such route
+				return ErrOldService
 			}
 			return fmt.Errorf("api %s: %d %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
 		}

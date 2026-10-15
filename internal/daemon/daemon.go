@@ -627,7 +627,8 @@ type Status struct {
 	Stats     resolver.StatsSnapshot `json:"stats"`
 	Uptime    string                 `json:"uptime"`
 	Version   string                 `json:"version"`
-	Instance  int64                  `json:"instance"` // changes when the service restarts
+	Build     string                 `json:"build,omitempty"` // BuildID of the running executable
+	Instance  int64                  `json:"instance"`        // changes when the service restarts
 }
 
 // conflictScanEvery bounds how often the process table is walked for status polls.
@@ -640,7 +641,7 @@ func (d *Daemon) Status() Status {
 	d.mu.Lock()
 	st := Status{Active: d.active, Enabled: d.cfg.Enabled, Mode: d.cfg.Mode, Listen: d.srv.Addrs(),
 		HostsSet: append([]string(nil), d.hostsSet...), LastError: d.lastErr,
-		Warnings: append([]string(nil), d.warnings...), Uptime: time.Since(d.started).Round(time.Second).String(), Version: Version,
+		Warnings: append([]string(nil), d.warnings...), Uptime: time.Since(d.started).Round(time.Second).String(), Version: Version, Build: BuildID(),
 		Instance: d.started.UnixNano()}
 	d.mu.Unlock()
 	st.SysDNS = d.sys.Status()

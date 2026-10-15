@@ -60,13 +60,15 @@ type State struct {
 	Service string         `json:"service"` // running | stopped | not_installed | unknown
 	Status  *daemon.Status `json:"status,omitempty"`
 	Error   string         `json:"error,omitempty"`
+	// GUIBuild is the build of this window; the service reports its own in Status.Build.
+	GUIBuild string `json:"gui_build,omitempty"`
 }
 
 func (a *App) State() State {
 	st, err := a.cl.Status()
 	if err == nil {
 		a.updateTray(st.Active)
-		return State{Service: "running", Status: &st}
+		return State{Service: "running", Status: &st, GUIBuild: daemon.BuildID()}
 	}
 	a.updateTray(false)
 	if errors.Is(err, api.ErrNoAccess) {

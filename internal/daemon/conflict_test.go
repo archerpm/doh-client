@@ -45,3 +45,13 @@ func TestStatusWarnsAboutDNSTakingPrograms(t *testing.T) {
 		t.Fatal("hosts mode does not touch DNS, no warning expected")
 	}
 }
+
+func TestStatusReportsBuild(t *testing.T) {
+	dir := t.TempDir()
+	d := New(config.NewStore(filepath.Join(dir, "config.json")), filepath.Join(dir, "backup.json"))
+	d.setCfg(config.Default())
+	b := d.Status().Build
+	if len(b) != 12 || b != BuildID() {
+		t.Fatalf("Build = %q, BuildID = %q", b, BuildID())
+	}
+}
