@@ -34,8 +34,12 @@ type Provider struct {
 	Geo       bool     `json:"geo"` // provider returns proxy IPs for geo-blocked services
 	Note      string   `json:"note,omitempty"`
 	UseGET    bool     `json:"use_get,omitempty"`
-	// Services names what the provider is known to unblock (informational).
+	// Services names what the provider itself says it unblocks (informational).
 	Services []string `json:"services,omitempty"`
+	// Tested lists the services whose hosts really resolved to this provider's
+	// proxy addresses in our own test run on TestedAt (see tools/probesupport).
+	Tested   []string `json:"tested,omitempty"`
+	TestedAt string   `json:"tested_at,omitempty"`
 	// Lists are domain lists the provider itself publishes. Only built-in providers
 	// have them: Normalize drops them from custom ones, so a saved config can never
 	// make the service fetch an arbitrary URL.
@@ -79,8 +83,20 @@ type Config struct {
 // Timeout returns the per-upstream timeout.
 func (c *Config) Timeout() time.Duration { return time.Duration(c.TimeoutMS) * time.Millisecond }
 
-// BuiltinProviders are the known providers. Verified 2026-10-13.
+// BuiltinProviders are the known providers. Verified 2026-10-13; the support
+// results come from the last run of tools/probesupport.
 func BuiltinProviders() []Provider {
+	ps := builtinProviders()
+	for i := range ps {
+		if t, ok := testedSupport[ps[i].ID]; ok {
+			ps[i].Tested = append([]string(nil), t...)
+			ps[i].TestedAt = SupportTestedAt
+		}
+	}
+	return ps
+}
+
+func builtinProviders() []Provider {
 	return []Provider{
 		{ID: "comss", Name: "Comss.one", URL: "https://dns.comss.one/dns-query",
 			Bootstrap: []string{"195.133.25.16", "83.220.169.155", "212.109.195.93"}, Enabled: true, Builtin: true, Geo: true,
@@ -113,7 +129,7 @@ func BuiltinProviders() []Provider {
 			Services: []string{"AI-сервисы (Anthropic, ChatGPT и др.); список не публикуется"}},
 		{ID: "mafioznik", Name: "Mafioznik", URL: "https://dns.mafioznik.xyz/dns-query",
 			Bootstrap: []string{"103.27.157.38", "103.27.157.100"}, Enabled: false, Builtin: true, Geo: true,
-			Note:     "Только HTTP/2; часть доменов (chatgpt.com, notion.so) отдаёт 0.0.0.0",
+			Note:     "Только HTTP/2; ответы нестабильны: часть доменов (chatgpt.com, notion.so) отдаёт 0.0.0.0",
 			Services: []string{"xAI Grok", "Linear (частично)"}},
 		{ID: "bezmezhau", Name: "Bezmezhau", URL: "https://dns.bezmezhau.com/dns-query",
 			Bootstrap: []string{"143.20.64.55"}, Enabled: false, Builtin: true, Geo: true,

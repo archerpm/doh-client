@@ -245,6 +245,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 16
 .pd-row { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
 .pd-row.muted { display: block; color: var(--muted); }
 .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; background: var(--raise); border: 1px solid var(--rule); font-size: 12px; }
+.chip.tested { border-color: color-mix(in srgb, var(--good) 45%, var(--rule)); }
 
 .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .preset { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: var(--r-m); background: var(--surface); border: 1px solid var(--rule); }

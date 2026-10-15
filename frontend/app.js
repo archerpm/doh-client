@@ -464,7 +464,12 @@ function listSummary(p) {
 
 function provDetail(p) {
   const parts = [];
-  if (p.services?.length) parts.push(`<div class="pd-row"><b>Поддерживает:</b> ${p.services.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div>`);
+  if (p.services?.length) parts.push(`<div class="pd-row"><b>Заявлено провайдером:</b> ${p.services.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div>`);
+  if (p.tested?.length) {
+    const d = (p.tested_at || "").split("-").reverse().join(".");
+    parts.push(`<div class="pd-row"><b>Подтверждено тестами (${p.tested.length}):</b> ${p.tested.map((s) => `<span class="chip tested">${esc(s)}</span>`).join("")}</div>`);
+    parts.push(`<div class="pd-row muted">Получено на основе реальных проверок${d ? ` от ${esc(d)}` : ""}: мы спросили провайдера про хосты каждого сервиса (по спискам GeoHide и нашим наборам) и сравнили ответы с обычным DNS. Сервис засчитан, если не менее половины его хостов получили адреса прокси провайдера; нестабильные ответы не засчитывались. Сервисов вне этого перечня провайдер может поддерживать больше.</div>`);
+  }
   const t = S.provTest[p.id];
   if (t) parts.push(`<div class="pd-row"><b>Последняя проверка:</b> ${esc(t.detail)}</div>`);
   if (p.lists?.length) {
