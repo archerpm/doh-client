@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/archerpm/doh-client/internal/config"
+	"github.com/archerpm/doh-client/internal/conflict"
 	"github.com/archerpm/doh-client/internal/hosts"
 	"github.com/archerpm/doh-client/internal/resolver"
 	"github.com/archerpm/doh-client/internal/server"
@@ -48,6 +49,7 @@ type Daemon struct {
 	events       eventBuffer
 	healthEvents transitionState                                   // guarded by opMu
 	inspectDNS   func(context.Context, []string) sysdns.Inspection // set before maintenance starts; nil uses sysdns.Inspect
+	conflicts    *conflict.Detector                                // nil: no check for DNS-taking programs
 
 	opMu             sync.Mutex // serializes enable/disable/config/maintenance (may block on I/O)
 	mu               sync.Mutex // guards the fields below; held only briefly
@@ -72,7 +74,8 @@ type Daemon struct {
 // New builds a daemon using the given store and DNS backup path.
 func New(store *config.Store, backupPath string) *Daemon {
 	r := resolver.New()
-	return &Daemon{store: store, router: r, srv: server.New(r), sys: sysdns.New(backupPath), hostsPath: hosts.Path()}
+	return &Daemon{store: store, router: r, srv: server.New(r), sys: sysdns.New(backupPath), hostsPath: hosts.Path(),
+		conflicts: conflict.NewDetector(conflictScanEvery)}
 }
 
 // Router exposes the router (diagnostics API).
@@ -624,6 +627,9 @@ type Status struct {
 	Instance  int64                  `json:"instance"` // changes when the service restarts
 }
 
+// conflictScanEvery bounds how often the process table is walked for status polls.
+const conflictScanEvery = 15 * time.Second
+
 // Version is set by main.
 var Version = "dev"
 
@@ -636,6 +642,9 @@ func (d *Daemon) Status() Status {
 	d.mu.Unlock()
 	st.SysDNS = d.sys.Status()
 	st.Warnings = append(st.Warnings, st.SysDNS.Warnings...)
+	if d.conflicts != nil && st.Active && st.Mode == config.ModeProxy {
+		st.Warnings = append(st.Warnings, conflict.Warnings(d.conflicts.Names())...)
+	}
 	st.Health = d.router.Health()
 	st.Events = d.events.Snapshot()
 	st.Stats = d.router.Stats()
