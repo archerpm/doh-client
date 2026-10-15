@@ -53,9 +53,29 @@ func Presets() []Preset {
 				"cdn.openaimerge.com", "oaistatsig.com", "claudemcpcontent.com", "grokusercontent.com",
 				"copilot.com", "copilot.cloud.microsoft", "copilot-proxy.githubusercontent.com",
 				"elevenreader.io",
+				// added from GeoHide's published lists (Internet-Helper/GeoHideDNS, 2026-10-16)
+				"aicode.googleapis.com", "appcatalyst.pa.googleapis.com", "developerprofiles-pa.googleapis.com",
+				"flow.google", "flow.google.com", "flowmusic.app", "geminiweb-pa.clients.google.com", "labs.google.com",
+				"labstailwind.pa.googleapis.com", "notebook.google", "notebook.google.com", "notebooklm-pa.googleapis.com",
+				"notebook-pa.googleapis.com", "opal.google", "opal.google.com", "opal.withgoogle.com", "playground.google",
+				"people-pa.clients6.google.com",
+				"claudemcpclient.com", "deepl.app", "cici.com", "dola.com", "camelai.com", "dr.miromind.ai",
+				"hume.ai", "kaleido.ai", "manus.im", "files.manuscdn.com", "meta.ai", "monica.im", "pi.ai",
+				"platform.parallel.ai", "reve.art", "reve.com", "yupp.ai", "genspark.ai", "tokenharbor.ai",
 			},
 			Providers: []string{"malw", "comss", "geohide", "malw-cf", "dnsai"},
-			Note:      "ChatGPT, Claude, Gemini, Grok, Copilot, DeepL, ElevenLabs"},
+			Note:      "ChatGPT, Claude, Gemini, Grok, Copilot, DeepL, ElevenLabs, NotebookLM, Manus, Meta AI"},
+		{ID: "ai-dev", Name: "AI-разработка",
+			Domains: []string{
+				// Cursor, Windsurf/Codeium, Trae, OpenCode, Qoder: AI-редакторы и агенты
+				"cursor.com", "cursor.sh", "cursor-cdn.com", "cursorvm.com", "cursorapi.com",
+				"codeium.com", "windsurf.com", "trae.ai", "api16-normal-alisg.mchost.guru", "trae-api-sg.mchost.guru",
+				"opencode.ai", "qoder.com",
+				// inference APIs
+				"groq.com", "cerebras.ai", "openrouter.ai", "inceptionlabs.ai",
+			},
+			Providers: []string{"geohide", "malw", "comss", "malw-cf", "dnsai"},
+			Note:      "Cursor, Windsurf, Trae, OpenCode, Groq, Cerebras, OpenRouter"},
 		{ID: "ai-support", Name: "AI: вход и вспомогательные домены",
 			Domains: []string{
 				// Google sign-in, assets and APIs the AI web apps load
