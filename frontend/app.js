@@ -505,12 +505,13 @@ function svcDetail(p) {
   const r = S.svc.results[p.id], rows = [];
   if (r) {
     const at = new Date(r.at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-    rows.push(`<div class="pd-row"><b>Ваша проверка, ${esc(at)}: ${r.services.length}</b> ${r.services.map((s) => `<span class="chip live">${esc(s)}</span>`).join("") || '<span class="muted">провайдер ничего не подменяет</span>'}</div>`);
-    const base = new Set(p.tested || []), now = new Set(r.services);
-    const added = r.services.filter((s) => !base.has(s)), gone = (p.tested || []).filter((s) => !now.has(s));
+    const bad = r.unreachable || [];
+    rows.push(`<div class="pd-row"><b>Ваша проверка, ${esc(at)}: открываются ${r.services.length}</b> ${r.services.map((s) => `<span class="chip live">${esc(s)}</span>`).join("") || '<span class="muted">ничего</span>'}</div>`);
+    if (bad.length) rows.push(`<div class="pd-row"><b>Прокси не отвечает у вас (${bad.length}):</b> ${bad.map((s) => `<span class="chip bad">${esc(s)}</span>`).join("")}</div><div class="pd-row muted">DNS подменяет адрес, но соединение с ним не устанавливается: эти сервисы через провайдера не откроются.</div>`);
+    const base = new Set(p.tested || []), now = new Set([...r.services, ...bad]);
+    const added = [...now].filter((s) => !base.has(s)), gone = (p.tested || []).filter((s) => !now.has(s));
     if (p.tested?.length && (added.length || gone.length)) rows.push(`<div class="pd-row muted">Изменилось: ${[added.length ? "добавились " + added.map(esc).join(", ") : "", gone.length ? "пропали " + gone.map(esc).join(", ") : ""].filter(Boolean).join("; ")}.</div>`);
     if (r.errors * 5 > r.hosts) rows.push(`<div class="pd-row muted">Провайдер не ответил на ${r.errors} из ${r.hosts} запросов: результат неполный, повторите.</div>`);
-    if (S.provTest[p.id]?.status === "unreachable") rows.push(`<div class="pd-row bad-note">Прокси этого провайдера у вас не отвечает: сервисы выше не откроются.</div>`);
   }
   const busy = S.svc.running;
   rows.push(`<div class="pd-row"><button type="button" class="btn sm svc-run" data-id="${esc(p.id)}" ${busy || S.state?.status?.active || !S.cfg ? "disabled" : ""}>${busy && S.svc.provider === p.id ? "Проверяем…" : r ? "Проверить сервисы ещё раз" : "Проверить сервисы"}</button></div>`);

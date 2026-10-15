@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -18,12 +19,14 @@ var ErrNotBypassProvider = errors.New("сервисы проверяются т�
 
 // ServiceTestResult is what one provider was seen proxying in the last check.
 type ServiceTestResult struct {
-	Provider string    `json:"provider"`
-	Name     string    `json:"name"`
-	Services []string  `json:"services"`
-	Hosts    int       `json:"hosts"`  // hosts asked
-	Errors   int       `json:"errors"` // hosts the provider did not answer; many means the result is unreliable
-	At       time.Time `json:"at"`
+	Provider string   `json:"provider"`
+	Name     string   `json:"name"`
+	Services []string `json:"services"` // proxied and the proxy answers TLS from here
+	// Unreachable are proxied in DNS, but the proxy address does not complete a TLS handshake from here.
+	Unreachable []string  `json:"unreachable"`
+	Hosts       int       `json:"hosts"`  // hosts asked
+	Errors      int       `json:"errors"` // hosts the provider did not answer; many means the result is unreliable
+	At          time.Time `json:"at"`
 }
 
 // ServiceTestState is the progress and results of the service check.
@@ -41,6 +44,9 @@ type serviceTest struct {
 	state  ServiceTestState
 	cancel context.CancelFunc
 }
+
+// serviceReachTimeout bounds one TLS handshake with a provider's proxy address.
+const serviceReachTimeout = 5 * time.Second
 
 // runSupport is support.Run (replaceable in tests).
 var runSupport = support.Run
@@ -87,7 +93,12 @@ func (d *Daemon) StartServiceTest(providerID string) error {
 	for _, p := range config.Presets() {
 		extra = append(extra, p.Domains...)
 	}
-	o := support.Options{Services: config.ServiceProbes(), Extra: extra, Providers: provs, Bootstrap: cfg.BootstrapDNS}
+	o := support.Options{Services: config.ServiceProbes(), Extra: extra, Providers: provs, Bootstrap: cfg.BootstrapDNS,
+		Reach: func(ctx context.Context, provider, host string, ip netip.Addr) bool {
+			c, cancel := context.WithTimeout(ctx, serviceReachTimeout)
+			defer cancel()
+			return probeReach(c, provider, host, ip).TLS == "ok"
+		}}
 
 	s := &d.svcTest
 	s.mu.Lock()
@@ -134,11 +145,17 @@ func (d *Daemon) StartServiceTest(providerID string) error {
 			}
 		}
 		for _, r := range res {
-			services := r.Services
-			if services == nil {
-				services = []string{}
+			services, bad := []string{}, map[string]bool{}
+			for _, n := range r.Unreachable {
+				bad[n] = true
 			}
-			keep = append(keep, ServiceTestResult{Provider: r.Provider, Name: byID[r.Provider].Name, Services: services, Hosts: r.Hosts, Errors: r.Errors, At: now})
+			for _, n := range r.Services {
+				if !bad[n] {
+					services = append(services, n)
+				}
+			}
+			unreachable := append([]string{}, r.Unreachable...)
+			keep = append(keep, ServiceTestResult{Provider: r.Provider, Name: byID[r.Provider].Name, Services: services, Unreachable: unreachable, Hosts: r.Hosts, Errors: r.Errors, At: now})
 		}
 		s.state.Results = keep
 	}()

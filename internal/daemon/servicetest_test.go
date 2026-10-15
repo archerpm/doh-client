@@ -33,7 +33,7 @@ func TestServiceTest(t *testing.T) {
 		var out []support.ProviderResult
 		for _, p := range o.Providers {
 			ids = append(ids, p.ID)
-			out = append(out, support.ProviderResult{Provider: p.ID, Services: []string{"Claude"}, Hosts: 9})
+			out = append(out, support.ProviderResult{Provider: p.ID, Services: []string{"Claude", "ChatGPT"}, Unreachable: []string{"ChatGPT"}, Hosts: 9})
 		}
 		asked = append(asked, ids)
 		o.Progress(5, 10)
@@ -68,6 +68,10 @@ func TestServiceTest(t *testing.T) {
 	st := waitServiceTest(t, d)
 	if st.Error != "" || len(st.Results) != 1 || st.Results[0].Provider != "geohide" || st.Results[0].Name == "" || st.Results[0].At.IsZero() {
 		t.Fatalf("one provider result: %+v", st)
+	}
+
+	if r := st.Results[0]; len(r.Services) != 1 || r.Services[0] != "Claude" || len(r.Unreachable) != 1 || r.Unreachable[0] != "ChatGPT" {
+		t.Fatalf("reachable and unreachable services must be split: %+v", r)
 	}
 
 	// all bypass providers: the geohide result is replaced, nothing else is lost

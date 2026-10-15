@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/archerpm/doh-client/internal/config"
@@ -172,5 +173,57 @@ func TestRunCancelled(t *testing.T) {
 		Ask: func(context.Context, config.Provider, string) (*dns.Msg, error) { return nil, nil }})
 	if err == nil {
 		t.Fatal("a cancelled run must report the cancellation")
+	}
+}
+
+// TestRunReach: the DNS says both services are proxied, but the proxy answers
+// TLS only for Claude, so ChatGPT is reported unreachable (and the progress
+// total counts the reach phase).
+func TestRunReach(t *testing.T) {
+	services := []config.Service{
+		{Name: "Claude", Hosts: []string{"claude.ai", "api.anthropic.com"}},
+		{Name: "ChatGPT", Hosts: []string{"chatgpt.com"}},
+		{Name: "Notion", Hosts: []string{"notion.so"}}, // not proxied: never tested
+	}
+	var tested []string
+	var mu sync.Mutex
+	o := Options{
+		Services:  services,
+		Providers: []config.Provider{{ID: "good"}},
+		Repeat:    3,
+		Workers:   2,
+		Ref:       func(context.Context, string) []netip.Addr { return ip("93.184.216.34") },
+		Ask: func(_ context.Context, _ config.Provider, h string) (*dns.Msg, error) {
+			if h == "notion.so" {
+				return reply(h, "93.184.216.34"), nil
+			}
+			return reply(h, "193.233.112.68"), nil
+		},
+		Reach: func(_ context.Context, provider, host string, a netip.Addr) bool {
+			mu.Lock()
+			tested = append(tested, host)
+			mu.Unlock()
+			return host != "chatgpt.com" && a.String() == "193.233.112.68" && provider == "good"
+		},
+	}
+	var last, total int
+	o.Progress = func(done, all int) { last, total = done, all }
+	res, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Claude", "ChatGPT"}; !reflect.DeepEqual(res[0].Services, want) {
+		t.Errorf("Services = %v, want %v", res[0].Services, want)
+	}
+	if want := []string{"ChatGPT"}; !reflect.DeepEqual(res[0].Unreachable, want) {
+		t.Errorf("Unreachable = %v, want %v", res[0].Unreachable, want)
+	}
+	for _, h := range tested {
+		if h == "notion.so" {
+			t.Error("an unsupported service must not be probed")
+		}
+	}
+	if want := 4 + 3*4 + 3; total != want || last != want { // hosts + repeat*hosts + services
+		t.Errorf("progress ended at %d of %d, want %d", last, total, want)
 	}
 }

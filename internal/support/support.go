@@ -137,6 +137,10 @@ type ProviderResult struct {
 	Hosts    int      // hosts asked
 	Errors   int      // hosts the provider did not answer in the last run
 	Raw      map[string]RawAnswer
+	// Unreachable are the Services whose proxy address did not complete a TLS
+	// handshake (only with Options.Reach): the DNS says "proxied" but the site
+	// would not open from here.
+	Unreachable []string
 
 	votes map[string]int
 	runs  int
@@ -155,6 +159,11 @@ type Options struct {
 	Workers   int               // parallel DoH queries per provider (default 8)
 	MinApex   int               // see PoolMinApex
 	Progress  func(done, total int)
+	// Reach, when set, checks that the proxy address a provider returned for a
+	// host really accepts a TLS connection for it; services that fail it are
+	// reported as Unreachable. The generator leaves it nil: its data must not
+	// depend on the network it ran from.
+	Reach func(ctx context.Context, provider, host string, ip netip.Addr) bool
 
 	// replaceable in tests
 	Ask func(ctx context.Context, p config.Provider, host string) (*dns.Msg, error)
@@ -215,6 +224,9 @@ func Run(ctx context.Context, o Options) ([]ProviderResult, error) {
 	}
 	hosts := o.Hosts()
 	total := len(hosts) + o.Repeat*len(o.Providers)*len(hosts)
+	if o.Reach != nil {
+		total += len(o.Providers) * len(o.Services)
+	}
 	var pmu sync.Mutex // Progress calls are serialized and never go backwards
 	done := 0
 	step := func() {
@@ -351,9 +363,71 @@ func Run(ctx context.Context, o Options) ([]ProviderResult, error) {
 				res.Services = append(res.Services, s.Name)
 			}
 		}
+		if o.Reach != nil {
+			res.Unreachable = checkReach(ctx, o, p, res, learnPool(runs[len(runs)-1][p.ID], ref16, o.MinApex), runs[len(runs)-1][p.ID], step)
+		}
 		out = append(out, res)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// checkReach opens a TLS connection to the proxy address of up to two proxied
+// hosts of every supported service; a service none of them answers for is
+// unreachable. step is called once per catalogue service (supported or not).
+func checkReach(ctx context.Context, o Options, p config.Provider, res ProviderResult, pl pool, last map[string][]netip.Addr, step func()) []string {
+	supported := map[string]bool{}
+	for _, n := range res.Services {
+		supported[n] = true
+	}
+	var mu sync.Mutex
+	var bad []string
+	byName := map[string]config.Service{}
+	var names []string
+	for _, s := range o.Services {
+		byName[s.Name] = s
+		names = append(names, s.Name)
+	}
+	runPool(names, o.Workers, func(name string) {
+		defer step()
+		if !supported[name] || ctx.Err() != nil {
+			return
+		}
+		type target struct {
+			host string
+			ip   netip.Addr
+		}
+		var targets []target
+		for _, h := range byName[name].Hosts {
+			if len(targets) == 2 || !res.Proxied(h) {
+				continue
+			}
+			for _, a := range last[h] {
+				if a.Is4() && pl.has(a) {
+					targets = append(targets, target{h, a})
+					break
+				}
+			}
+		}
+		if len(targets) == 0 {
+			return // no usable answer in the last run: nothing to test, nothing to blame
+		}
+		for _, t := range targets {
+			if o.Reach(ctx, p.ID, t.host, t.ip) {
+				return
+			}
+		}
+		if ctx.Err() != nil {
+			return // a cancelled test says nothing about the proxy
+		}
+		mu.Lock()
+		bad = append(bad, name)
+		mu.Unlock()
+	})
+	sort.Strings(bad)
+	return bad
 }
 
 func errorsFor(hosts []string) map[string]RawAnswer {
