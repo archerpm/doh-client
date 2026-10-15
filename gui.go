@@ -297,3 +297,14 @@ func (a *App) setupTray(app *application.App) {
 	}
 	a.tray.SetTooltip("DoH Client")
 }
+
+// StartServiceTest begins checking which services a provider (all when empty) proxies.
+func (a *App) StartServiceTest(provider string) (daemon.ServiceTestState, error) {
+	return a.cl.StartServiceTest(provider)
+}
+
+// ServiceTest returns the progress and results of the service check.
+func (a *App) ServiceTest() (daemon.ServiceTestState, error) { return a.cl.ServiceTest() }
+
+// CancelServiceTest stops a running service check.
+func (a *App) CancelServiceTest() (daemon.ServiceTestState, error) { return a.cl.CancelServiceTest() }

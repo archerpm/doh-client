@@ -67,6 +67,8 @@ type Daemon struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	svcTest serviceTest // the service check of the Providers tab
+
 	poolMu    sync.Mutex
 	poolCache map[string]*proxyPool
 }

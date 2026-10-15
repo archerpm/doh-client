@@ -138,6 +138,14 @@ func TestDaemonAPIEndToEnd(t *testing.T) {
 		t.Fatalf("provider test must be refused while the bypass is on: %v", err)
 	}
 
+	// the service check is refused while the bypass is on too; its state is readable
+	if _, err := cl.StartServiceTest("geohide"); err == nil || !strings.Contains(err.Error(), "обход включён") {
+		t.Fatalf("service check must be refused while the bypass is on: %v", err)
+	}
+	if st, err := cl.ServiceTest(); err != nil || st.Running {
+		t.Fatalf("service check state: %+v %v", st, err)
+	}
+
 	// provider lists come from the built-in definitions only: unknown ones are refused
 	if _, err := cl.ProviderList("cloudflare", "x"); err == nil || !strings.Contains(err.Error(), "нет такого") {
 		t.Fatalf("unknown provider list must be refused: %v", err)

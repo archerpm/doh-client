@@ -59,6 +59,9 @@ func NewServer(d *daemon.Daemon, addr, tokenFile, owner string) (*Server, error)
 	mux.HandleFunc("POST /v1/test", s.test)
 	mux.HandleFunc("POST /v1/test-providers", s.testProviders)
 	mux.HandleFunc("POST /v1/provider-list", s.providerList)
+	mux.HandleFunc("GET /v1/test-services", s.serviceTestState)
+	mux.HandleFunc("POST /v1/test-services", s.serviceTestStart)
+	mux.HandleFunc("POST /v1/test-services/cancel", s.serviceTestCancel)
 	mux.HandleFunc("POST /v1/diagnose", s.diagnose)
 	mux.HandleFunc("GET /v1/log", s.log)
 	mux.HandleFunc("POST /v1/flush", s.flush)
@@ -375,3 +378,51 @@ func (c *Client) Flush() error { return c.do("POST", "/v1/flush", nil, nil) }
 
 // ReapplyDNS reapplies system DNS without restarting or disabling the proxy.
 func (c *Client) ReapplyDNS() error { return c.do("POST", "/v1/reapply-dns", nil, nil) }
+
+func (s *Server) serviceTestState(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.d.ServiceTest())
+}
+
+func (s *Server) serviceTestStart(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	err := s.d.StartServiceTest(req.Provider)
+	switch {
+	case errors.Is(err, daemon.ErrBypassActive), errors.Is(err, daemon.ErrServiceTestRunning):
+		writeErr(w, http.StatusConflict, err)
+	case errors.Is(err, daemon.ErrNotBypassProvider):
+		writeErr(w, http.StatusBadRequest, err)
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err)
+	default:
+		writeJSON(w, s.d.ServiceTest())
+	}
+}
+
+func (s *Server) serviceTestCancel(w http.ResponseWriter, r *http.Request) {
+	s.d.CancelServiceTest()
+	writeJSON(w, s.d.ServiceTest())
+}
+
+// StartServiceTest begins the background service check (one provider, or all when empty).
+func (c *Client) StartServiceTest(provider string) (r daemon.ServiceTestState, err error) {
+	err = c.do("POST", "/v1/test-services", map[string]string{"provider": provider}, &r)
+	return
+}
+
+// ServiceTest returns the progress and results of the service check.
+func (c *Client) ServiceTest() (r daemon.ServiceTestState, err error) {
+	err = c.do("GET", "/v1/test-services", nil, &r)
+	return
+}
+
+// CancelServiceTest stops a running service check.
+func (c *Client) CancelServiceTest() (r daemon.ServiceTestState, err error) {
+	err = c.do("POST", "/v1/test-services/cancel", nil, &r)
+	return
+}
