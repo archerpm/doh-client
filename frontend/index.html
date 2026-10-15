@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DoH Client</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <svg viewBox="0 0 36 36" class="logo" aria-hidden="true"><rect width="36" height="36" rx="9" fill="#ff5a1f"/><path d="M9 24h7l5-12h6" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="24" r="3" fill="#ff5a1f" stroke="#fff" stroke-width="2.2"/></svg>
+      <div><b>DoH</b><small id="ver"></small></div>
+    </div>
+    <nav id="nav" aria-label="Разделы">
+      <button data-tab="overview" class="on" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h4l3-7h3M11 12l3 7h3"/></svg>Схема</button>
+      <button data-tab="rules"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Правила</button>
+      <button data-tab="providers"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/></svg>Провайдеры</button>
+      <button data-tab="test"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg>Проверка домена</button>
+      <button data-tab="log"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM9 9h6M9 13h6M9 17h3"/></svg>Журнал</button>
+      <button data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>Настройки</button>
+    </nav>
+    <div class="rail-foot" id="railStatus" role="status"></div>
+  </aside>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section id="tab-overview" class="tab on">
+      <section id="quick" class="quick hidden" aria-labelledby="quickTitle">
+        <div class="quick-h">
+          <span class="eyebrow">— Быстрый старт</span>
+          <h2 id="quickTitle">Настроить и включить за один шаг</h2>
+          <p class="muted small">Установим службу (один запрос прав администратора), добавим правила выбранных наборов, включим обход и проверим результат. Уже существующие правила не меняются.</p>
+        </div>
+        <div id="quickPresets" class="quick-presets" role="group" aria-label="Наборы правил"></div>
+        <div class="row"><button class="btn primary" id="quickGo">Настроить и включить</button><span class="muted small" id="quickMsg"></span></div>
+        <ol id="quickStages" class="quick-stages" aria-live="polite"></ol>
+      </section>
+      <div id="noService" class="setup hidden">
+        <h1 id="setupTitle">Сначала установите службу</h1>
+        <p id="setupText">Локальный DNS работает как системная служба: ей нужны права администратора, чтобы слушать порт 53 и переключать DNS системы. Установка делается один раз, дальше приложение работает без запросов прав.</p>
+        <div class="row"><button class="btn primary" id="btnInstall">Установить службу</button><span class="muted" id="installMsg"></span></div>
+      </div>
+
+      <div id="main" class="hidden">
+        <header class="hero">
+          <div class="hero-text">
+            <h1 id="heroTitle">Обход выключен</h1>
+            <p id="heroSub" class="muted"></p>
+          </div>
+          <div class="hero-side">
+            <div class="radar" id="radar" aria-hidden="true"><i></i><i></i><i></i><i class="orbit"></i><i class="orbit b"></i><div class="radar-num"><span id="radarNum">0</span><small>линий в работе</small></div></div>
+            <button id="power" class="switch" role="switch" aria-checked="false"><span class="knob"></span><span class="switch-lbl">Включить</span></button>
+          </div>
+        </header>
+        <div id="alerts"></div>
+
+        <div class="mapbox">
+          <div class="maphead"><span class="live"><i></i> Live · маршруты запросов</span><span id="mapMode">DoH · 127.0.0.1:53</span></div>
+          <svg id="map" class="map" role="img" aria-label="Схема маршрутов DNS-запросов"></svg>
+          <dl class="counters">
+            <div><dt>Запросов</dt><dd id="sQ">0</dd></div>
+            <div><dt>По правилам</dt><dd id="sR">0</dd></div>
+            <div><dt>Из кэша</dt><dd id="sC">0</dd></div>
+            <div><dt>Ошибок</dt><dd id="sF">0</dd></div>
+          </dl>
+        </div>
+
+        <section id="events" class="events hidden" aria-labelledby="eventsTitle">
+          <h2 id="eventsTitle">События</h2>
+          <ul id="eventList" class="event-list"></ul>
+        </section>
+
+        <section id="suggest" class="suggest hidden" aria-labelledby="suggestTitle">
+          <h2 id="suggestTitle">Стоит проверить</h2>
+          <p class="muted small">Домены без правил, запросы к которым повторно заканчиваются ошибкой, таймаутом или ответом 0.0.0.0.</p>
+          <ul id="suggestList" class="suggest-list"></ul>
+        </section>
+
+        <section class="board" aria-labelledby="boardTitle">
+          <h2 id="boardTitle">Последние запросы</h2>
+          <ol id="board" class="board-list"></ol>
+          <p id="boardEmpty" class="muted">Запросов ещё не было. Откройте любой сайт — он появится здесь и на схеме.</p>
+        </section>
+      </div>
+    </section>
+
+    <!-- RULES -->
+    <section id="tab-rules" class="tab">
+      <header class="page-h"><h1>Правила</h1><p class="muted">Домены из правил вместе с поддоменами идут через выбранный туннель. Работает один провайдер на все запросы.</p></header>
+      <div class="presets" id="presets"></div>
+      <form id="ruleForm" class="addbar">
+        <input name="domain" placeholder="Домен, например notion.so" required aria-label="Домен">
+        <button class="btn primary">Добавить правило</button>
+      </form>
+      <div class="listhead">
+        <input id="ruleFilter" class="sm" placeholder="Найти правило" aria-label="Найти правило">
+        <span id="ruleCount" class="muted small"></span>
+        <button class="btn ghost sm" id="rulesClear">Удалить все</button>
+      </div>
+      <div id="ruleList" class="rlist"></div>
+    </section>
+
+    <!-- PROVIDERS -->
+    <section id="tab-providers" class="tab">
+      <header class="page-h"><h1>Провайдеры</h1><p class="muted">Работает один туннель — тот, что вы выбрали. Автопереключения на другой провайдер нет: если он не отвечает, вы увидите это в событиях.</p></header>
+      <section class="block">
+        <h2>Выберите туннель</h2>
+        <div class="provtest">
+          <button type="button" class="btn" id="provTest" title="Спросим каждого провайдера про домены ChatGPT, Claude и Grok и сравним ответы с обычным DNS. Работает только при выключенном обходе.">Проверить обход</button>
+          <span id="provTestHint" class="muted" role="status" aria-live="polite"></span>
+        </div>
+        <div id="provList" class="plist"></div>
+      </section>
+      <section class="block">
+        <h2>Свой DoH-сервер</h2>
+        <form id="provForm" class="grid-form">
+          <label>Название<input name="name" placeholder="Мой DNS" required></label>
+          <label>Адрес DoH<input name="url" placeholder="https://dns.example/dns-query" required></label>
+          <label>Bootstrap-адреса, необязательно<input name="bootstrap" placeholder="1.2.3.4, 5.6.7.8"></label>
+          <div class="checks">
+            <label class="chk"><input type="checkbox" name="geo"> Обходит геоблокировки</label>
+            <label class="chk"><input type="checkbox" name="get"> Отправлять GET-запросы</label>
+          </div>
+          <div><button class="btn primary">Добавить провайдера</button></div>
+        </form>
+      </section>
+    </section>
+
+    <!-- TEST -->
+    <section id="tab-test" class="tab">
+      <header class="page-h"><h1>Проверка домена</h1><p class="muted">Спросим выбранный туннель и покажем, ведёт ли он домен через свой прокси. «Диагностика» проверяет весь путь: правило, провайдера, DNS системы и соединение.</p></header>
+      <form id="testForm" class="addbar"><input name="domain" placeholder="chatgpt.com" required aria-label="Домен"><button class="btn primary">Проверить</button><button type="button" class="btn" id="diagGo" title="Правило, туннель, DNS системы и соединение с адресом по шагам">Диагностика</button></form>
+      <p id="testStatus" class="sr-only" role="status" aria-live="polite"></p>
+      <div id="testOut"></div>
+    </section>
+
+    <!-- LOG -->
+    <section id="tab-log" class="tab wide">
+      <header class="page-h row-h"><h1>Журнал</h1>
+        <div class="row wrap">
+          <input id="logFilter" class="sm" placeholder="Домен или провайдер" aria-label="Фильтр журнала">
+          <label class="chk sm"><input type="checkbox" id="logRules"> Только правила</label>
+          <button class="btn ghost sm" id="logPause">Пауза</button>
+          <button class="btn ghost sm" id="logClear">Очистить</button>
+          <button class="btn ghost sm" id="flush">Сбросить кэш DNS</button>
+        </div>
+      </header>
+      <div class="tbl-wrap"><table class="tbl"><colgroup><col class="c-time"><col class="c-dom"><col class="c-type"><col><col class="c-line"><col class="c-ms"></colgroup><thead><tr><th>Время</th><th>Домен</th><th>Тип</th><th>Ответ</th><th>Линия</th><th class="num">мс</th></tr></thead><tbody id="logBody"></tbody></table></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab">
+      <header class="page-h"><h1>Настройки</h1></header>
+      <section class="block">
+        <h2>Режим работы</h2>
+        <label class="radio"><input type="radio" name="mode" value="proxy"><span><b>Локальный DNS</b><small>Клиент слушает 127.0.0.1:53, системный DNS переключается на него. Работают все домены и поддомены, кэш. Все запросы идут через один выбранный провайдер.</small></span></label>
+        <label class="radio"><input type="radio" name="mode" value="hosts"><span><b>Файл hosts</b><small>Домены из правил один раз определяются через DoH и записываются в hosts, обновление раз в 6 часов. Резидентный DNS не нужен, но поддомены не покрываются.</small></span></label>
+      </section>
+      <section class="block">
+        <h2>Параметры</h2>
+        <form id="setForm" class="grid-form">
+          <label class="chk wide"><input type="checkbox" name="block_aaaa_for_rules"> <span>Отключать IPv6 для доменов из правил<small>Иначе трафик может пойти по IPv6 мимо прокси.</small></span></label>
+          <label class="chk wide"><input type="checkbox" name="block_https_rr_for_rules"> <span>Отключать HTTPS-записи для доменов из правил<small>В них браузер получает ECH и IPv6-подсказки, которые ломают обход.</small></span></label>
+          <label>Адреса прослушивания<input name="listen"></label>
+          <label>Bootstrap DNS<input name="bootstrap_dns"></label>
+          <label>Таймаут, мс<input name="timeout_ms" type="number" min="200" max="30000"></label>
+          <label>Размер кэша<input name="cache_size" type="number" min="1"></label>
+          <label>Мин. TTL, с<input name="min_ttl" type="number" min="0"></label>
+          <label>Макс. TTL, с<input name="max_ttl" type="number" min="1"></label>
+          <label>Проверка провайдеров, с<input name="health_interval_s" type="number" min="10"></label>
+          <div class="form-end"><button class="btn primary">Сохранить настройки</button></div>
+        </form>
+      </section>
+      <section class="block">
+        <h2>Приложение и служба</h2>
+        <label class="chk"><input type="checkbox" id="autostart"> Запускать при входе в систему, свёрнутым в трей (на macOS может открыться окно)</label>
+        <dl class="kv" id="info"></dl>
+        <div class="row"><button class="btn" id="btnReinstall">Переустановить службу</button><button class="btn danger" id="btnUninstall">Удалить службу</button></div>
+      </section>
+      <section class="block tips">
+        <h2>Если сайт не открывается</h2>
+        <ul>
+          <li>Отключите «Безопасный DNS» в браузере. Chrome и Edge: Настройки, Конфиденциальность, «Использовать безопасный DNS». Firefox: Настройки, Приватность, «DNS через HTTPS» — выключено. Иначе браузер ходит в свой DoH мимо клиента.</li>
+          <li>Выключите VPN и прокси: они перехватывают DNS и трафик.</li>
+          <li>Сбросьте кэш в журнале и перезапустите браузер — он помнит старые адреса.</li>
+          <li>На вкладке «Проверка домена» видно, какой провайдер действительно ведёт нужный домен.</li>
+        </ul>
+      </section>
+    </section>
+  </main>
+</div>
+<div id="toast" aria-live="polite"></div>
+</body>
+</html>

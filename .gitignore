@@ -1,0 +1,14 @@
+# build outputs
+/dist/
+*.exe
+*.test
+
+# Codex review scratch (caches, logs, validation dumps)
+/build/.codex-*
+/build/codex-*
+
+# editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
