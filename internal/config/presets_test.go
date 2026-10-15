@@ -70,9 +70,22 @@ func TestPresetsCoverReferenceList(t *testing.T) {
 func TestDefaultRules(t *testing.T) {
 	rules := DefaultRules()
 	want := map[string]bool{}
+	optional := map[string]bool{}
 	for _, p := range Presets() {
 		for _, d := range p.Domains {
-			want[d] = true
+			if p.Optional {
+				optional[d] = true
+			} else {
+				want[d] = true
+			}
+		}
+	}
+	if len(optional) == 0 {
+		t.Fatal("expected the ai-support preset to be optional")
+	}
+	for _, r := range rules {
+		if optional[r.Domain] && !want[r.Domain] {
+			t.Errorf("optional preset domain %q is in the default rules", r.Domain)
 		}
 	}
 	if len(rules) != len(want) {
@@ -92,7 +105,7 @@ func TestFirstRunSeedsRulesButExistingConfigIsKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Rules) != len(DefaultRules()) {
+	if len(c.Rules) != len(DefaultRules()) || len(c.Rules) == 0 {
 		t.Fatalf("first run has %d rules, want %d", len(c.Rules), len(DefaultRules()))
 	}
 	if c.ActiveProvider == "" || len(c.DefaultChain) != 1 {

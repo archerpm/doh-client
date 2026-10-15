@@ -7,6 +7,9 @@ type Preset struct {
 	Domains   []string `json:"domains"`
 	Providers []string `json:"providers"`
 	Note      string   `json:"note"`
+	// Optional presets are offered in the UI but are not part of the rules a
+	// fresh configuration starts with.
+	Optional bool `json:"optional"`
 }
 
 // Presets are the services the client targets. Subdomains are matched
@@ -70,7 +73,8 @@ func Presets() []Preset {
 				"images.workoscdn.com", "setup.workos.com", "workos.imgix.net", "challenges.cloudflare.com",
 			},
 			Providers: []string{"malw", "comss", "geohide", "malw-cf", "dnsai"},
-			Note:      "Вход через Google/GitHub/Microsoft, шрифты и CDN, нужные AI-сервисам. Домены общие: правила на них затрагивают и остальные сайты на этих доменах"},
+			Note:      "Вход через Google/GitHub/Microsoft, шрифты и CDN, нужные AI-сервисам. Домены общие и не заблокированы: обходу они не нужны, а правило отключает IPv6 (AAAA) для всех сайтов на этих доменах. Поэтому набор не включён по умолчанию",
+			Optional:  true},
 		{ID: "work", Name: "Работа и разработка",
 			Domains: []string{
 				"notion.so", "notion.com", "notion.site", "notion.new", "notion-static.com",
@@ -94,18 +98,22 @@ func Presets() []Preset {
 			Domains: []string{
 				"supercell.com", "brawlstars.com", "brawlstarsgame.com", "clashofclans.com", "clashroyale.com", "clashroyaleapp.com",
 				"haydaygame.com", "squadbustersgame.com",
-				"geforcenow.com", "gfn.am", "nvidiagrid.net", "parsec.app",
+				"geforcenow.com", "gfn.am", "parsec.app",
 			},
 			Providers: []string{"malw", "comss", "malw-cf"},
 			Note:      "Supercell, GeForce NOW, Parsec"},
 	}
 }
 
-// DefaultRules turns every preset domain into an enabled rule (once each).
+// DefaultRules turns every domain of the non-optional presets into an enabled
+// rule (once each).
 func DefaultRules() []Rule {
 	seen := map[string]bool{}
 	rules := []Rule{}
 	for _, p := range Presets() {
+		if p.Optional {
+			continue
+		}
 		for _, d := range p.Domains {
 			if !seen[d] {
 				seen[d] = true
