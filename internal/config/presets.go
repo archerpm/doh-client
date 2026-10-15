@@ -94,14 +94,6 @@ func Presets() []Preset {
 			},
 			Providers: []string{"malw", "malw-cf"},
 			Note:      "Spotify, SoundCloud, Deezer, Tidal, Patreon, Twitch"},
-		{ID: "games", Name: "Игры",
-			Domains: []string{
-				"supercell.com", "brawlstars.com", "brawlstarsgame.com", "clashofclans.com", "clashroyale.com", "clashroyaleapp.com",
-				"haydaygame.com", "squadbustersgame.com",
-				"geforcenow.com", "gfn.am", "parsec.app",
-			},
-			Providers: []string{"malw", "comss", "malw-cf"},
-			Note:      "Supercell, GeForce NOW, Parsec"},
 	}
 }
 
