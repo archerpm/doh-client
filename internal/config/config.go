@@ -136,6 +136,11 @@ func builtinProviders() []Provider {
 			Note: "ChatGPT, Spotify, YouTube, Netflix и др.; сервис для Беларуси (bezmezhau.com)",
 			// bezmezhau.com/supported-services
 			Services: []string{"ChatGPT", "Claude", "Gemini", "Brawl Stars", "Spotify", "Netflix", "YouTube", "Instagram и Facebook", "Discord", "Twitter / X", "TikTok", "Reddit"}},
+		{ID: "webshift", Name: "WebShift DNS", URL: "https://d.webshiftvpn.ru/dns-query",
+			Bootstrap: []string{"31.31.207.68"}, Enabled: false, Builtin: true, Geo: true,
+			Note: "Бесплатный DNS проекта WebShift VPN: ChatGPT, Claude, Gemini, Xbox и др.",
+			// dns.webshiftvpn.ru
+			Services: []string{"ChatGPT, Sora, Claude, Gemini, NotebookLM, Copilot, Grok, Perplexity, DeepL, ElevenLabs", "Xbox Live", "Notion, JetBrains", "Spotify, Twitch, Tidal, Deezer, Last.fm, Patreon"}},
 		{ID: "cloudflare", Name: "Cloudflare", URL: "https://cloudflare-dns.com/dns-query",
 			Bootstrap: []string{"1.1.1.1", "1.0.0.1"}, Enabled: true, Builtin: true,
 			Note: "Обычный DoH без обхода геоблокировок"},
