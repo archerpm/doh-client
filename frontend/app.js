@@ -505,11 +505,12 @@ function svcDetail(p) {
   const r = S.svc.results[p.id], rows = [];
   if (r) {
     const at = new Date(r.at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-    rows.push(`<div class="pd-row"><b>Проверено у вас, ${esc(at)} (${r.services.length}):</b> ${r.services.map((s) => `<span class="chip live">${esc(s)}</span>`).join("") || '<span class="muted">ни один сервис не подтверждён</span>'}</div>`);
+    rows.push(`<div class="pd-row"><b>Ваша проверка, ${esc(at)}: ${r.services.length}</b> ${r.services.map((s) => `<span class="chip live">${esc(s)}</span>`).join("") || '<span class="muted">провайдер ничего не подменяет</span>'}</div>`);
     const base = new Set(p.tested || []), now = new Set(r.services);
     const added = r.services.filter((s) => !base.has(s)), gone = (p.tested || []).filter((s) => !now.has(s));
-    if (p.tested?.length && (added.length || gone.length)) rows.push(`<div class="pd-row muted">Отличия от данных программы: ${added.length ? "появились " + added.map(esc).join(", ") : ""}${added.length && gone.length ? "; " : ""}${gone.length ? "не подтвердились " + gone.map(esc).join(", ") : ""}.</div>`);
-    if (r.errors * 5 > r.hosts) rows.push(`<div class="pd-row muted">Провайдер не ответил на ${r.errors} из ${r.hosts} запросов — результат неполный, повторите проверку.</div>`);
+    if (p.tested?.length && (added.length || gone.length)) rows.push(`<div class="pd-row muted">Изменилось: ${[added.length ? "добавились " + added.map(esc).join(", ") : "", gone.length ? "пропали " + gone.map(esc).join(", ") : ""].filter(Boolean).join("; ")}.</div>`);
+    if (r.errors * 5 > r.hosts) rows.push(`<div class="pd-row muted">Провайдер не ответил на ${r.errors} из ${r.hosts} запросов: результат неполный, повторите.</div>`);
+    if (S.provTest[p.id]?.status === "unreachable") rows.push(`<div class="pd-row bad-note">Прокси этого провайдера у вас не отвечает: сервисы выше не откроются.</div>`);
   }
   const busy = S.svc.running;
   rows.push(`<div class="pd-row"><button type="button" class="btn sm svc-run" data-id="${esc(p.id)}" ${busy || S.state?.status?.active || !S.cfg ? "disabled" : ""}>${busy && S.svc.provider === p.id ? "Проверяем…" : r ? "Проверить сервисы ещё раз" : "Проверить сервисы"}</button></div>`);
@@ -553,17 +554,26 @@ function listSummary(p) {
   return { lines, fresh: [...fresh], preset };
 }
 
+// one line per verdict of "Проверить обход"; the full detail stays in the tooltip
+const BYPASS_SHORT = {
+  works: "работает, прокси отвечает.",
+  unreachable: "прокси не отвечает из вашей сети, сайты через него не откроются.",
+  fails: "обход не подтверждён.",
+  error: "провайдер не ответил.",
+  unknown: "не удалось проверить.",
+};
+
 function provDetail(p) {
   const parts = [];
   if (p.services?.length) parts.push(`<div class="pd-row"><b>Заявлено провайдером:</b> ${p.services.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div>`);
   if (p.tested?.length) {
     const d = (p.tested_at || "").split("-").reverse().join(".");
-    parts.push(`<div class="pd-row"><b>Подтверждено тестами (${p.tested.length}):</b> ${p.tested.map((s) => `<span class="chip tested">${esc(s)}</span>`).join("")}</div>`);
-    parts.push(`<div class="pd-row muted">Получено на основе реальных проверок${d ? ` от ${esc(d)}` : ""}: мы спросили провайдера про хосты каждого сервиса (по спискам GeoHide и нашим наборам) и сравнили ответы с обычным DNS. Сервис засчитан, если не менее половины его хостов получили адреса прокси провайдера; нестабильные ответы не засчитывались. Сервисов вне этого перечня провайдер может поддерживать больше.</div>`);
+    parts.push(`<div class="pd-row"><b>Подменяет DNS у ${p.tested.length}:</b> ${p.tested.map((s) => `<span class="chip tested">${esc(s)}</span>`).join("")}</div>`);
+    parts.push(`<div class="pd-row muted">Данные программы${d ? ` на ${esc(d)}` : ""}. Это ответы DNS: провайдер отдаёт адрес своего прокси, но доступен ли он вам, тест не показывает.</div>`);
   }
   if (p.geo) parts.push(svcDetail(p));
   const t = S.provTest[p.id];
-  if (t) parts.push(`<div class="pd-row"><b>Последняя проверка:</b> ${esc(t.detail)}</div>`);
+  if (t) parts.push(`<div class="pd-row" title="${esc(t.detail)}"><b>Проверка обхода:</b> ${esc(BYPASS_SHORT[t.status] || t.detail)}</div>`);
   if (p.lists?.length) {
     const sel = (S.provSel[p.id] ??= new Set(p.lists.map((l) => l.id)));
     parts.push(`<div class="pd-row"><b>Опубликованные списки:</b> ${p.lists.map((l) => `<label class="chk sm"><input type="checkbox" class="pl-sel" data-id="${esc(p.id)}" data-list="${esc(l.id)}" ${sel.has(l.id) ? "checked" : ""}> ${esc(l.name)}</label>`).join(" ")}</div>`);
@@ -571,7 +581,7 @@ function provDetail(p) {
     parts.push(`<div class="pd-row"><button type="button" class="btn sm pl-refresh" data-id="${esc(p.id)}" ${busy || !S.cfg ? "disabled" : ""}>${busy ? "Загружаем…" : sum ? "Обновить списки" : "Загрузить списки"}</button>${sum && sum.fresh.length ? `<button type="button" class="btn sm primary pl-add" data-id="${esc(p.id)}">Добавить ${fmt.format(sum.fresh.length)} ${plural(sum.fresh.length, "домен", "домена", "доменов")} в правила</button>` : ""}</div>`);
     if (sum) parts.push(`<div class="pd-row muted">${sum.lines.map(esc).join("<br>")}${sum.fresh.length ? "" : "<br>Все домены списка уже покрыты вашими правилами."}${sum.preset.length ? `<br>Покрытие наборов: ${sum.preset.map(esc).join("; ")}` : ""}</div>`);
   } else if (p.geo) {
-    parts.push(`<div class="pd-row muted">Провайдер не публикует список доменов, обновлять нечего. Наборы правил обновляются вместе с программой.</div>`);
+    parts.push(`<div class="pd-row muted">Списка доменов у провайдера нет.</div>`);
   }
   if (!parts.length) return "";
   return `<details class="pdetail" data-id="${esc(p.id)}" ${S.provOpen.has(p.id) ? "open" : ""}><summary>Что поддерживает</summary>${parts.join("")}</details>`;
