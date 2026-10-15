@@ -181,7 +181,7 @@ func summarizeProvider(outcomes []canaryOutcome) (status, detail string, ms int6
 // only for a provider declared as a bypass one; for the others they are most
 // likely CDN geo-DNS (the same reason TestDomain only calls them "differs").
 func declaredBypass(geo bool, status, detail string) (string, string) {
-	if geo || status != "works" {
+	if geo || (status != "works" && status != "unreachable") {
 		return status, detail
 	}
 	return "fails", "ответы отличаются от обычного DNS, но провайдер не заявлен как обходной (это может быть гео-DNS CDN): " + detail

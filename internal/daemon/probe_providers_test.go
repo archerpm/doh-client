@@ -95,6 +95,8 @@ func TestDeclaredBypass(t *testing.T) {
 	}{
 		{true, "works", "works"},
 		{false, "works", "fails"},
+		{false, "unreachable", "fails"},
+		{true, "unreachable", "unreachable"},
 		{false, "fails", "fails"},
 		{false, "error", "error"},
 		{true, "unknown", "unknown"},
