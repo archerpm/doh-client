@@ -36,9 +36,41 @@ func Presets() []Preset {
 				// Microsoft / GitHub Copilot
 				"copilot.microsoft.com", "designer.microsoft.com", "githubcopilot.com",
 				"deepl.com", "elevenlabs.io", "perplexity.ai",
+				// added from the user's reference list (2026-10-15): AI-specific hosts
+				"aiplatform.googleapis.com", "aitestkitchen.withgoogle.com", "alkalicore-pa.clients6.google.com",
+				"alkalimakersuite-pa.clients6.google.com", "webchannel-alkalimakersuite-pa.clients6.google.com",
+				"antigravity.google.com", "antigravity-hub-auto-updater-974169037036.us-central1.run.app",
+				"assistant-s3-pa.googleapis.com", "businessaicode.googleapis.com", "businessaicode.mtls.googleapis.com",
+				"cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com",
+				"discoveryengine.googleapis.com", "discoveryengine.mtls.googleapis.com",
+				"eu-discoveryengine.googleapis.com", "eu-discoveryengine.mtls.googleapis.com",
+				"us-discoveryengine.googleapis.com", "us-discoveryengine.mtls.googleapis.com",
+				"gemini.app.google", "gemini.gstatic.com", "geminiweb-pa.clients6.google.com", "jnn-pa.googleapis.com",
+				"ogads-pa.clients6.google.com", "push.clients6.google.com", "signaler-pa.clients6.google.com", "waa-pa.clients6.google.com",
+				"cdn.openaimerge.com", "oaistatsig.com", "claudemcpcontent.com", "grokusercontent.com",
+				"copilot.com", "copilot.cloud.microsoft", "copilot-proxy.githubusercontent.com",
+				"elevenreader.io",
 			},
 			Providers: []string{"malw", "comss", "geohide", "malw-cf", "dnsai"},
 			Note:      "ChatGPT, Claude, Gemini, Grok, Copilot, DeepL, ElevenLabs"},
+		{ID: "ai-support", Name: "AI: вход и вспомогательные домены",
+			Domains: []string{
+				// Google sign-in, assets and APIs the AI web apps load
+				"accounts.google.com", "apis.google.com", "consent.google.com", "ogs.google.com", "play.google.com", "www.google.com",
+				"www.googleapis.com", "content.googleapis.com", "content-push.googleapis.com", "oauth2.googleapis.com", "maps.googleapis.com",
+				"fonts.googleapis.com", "fonts.gstatic.com", "maps.gstatic.com", "ssl.gstatic.com", "www.gstatic.com",
+				"encrypted-tbn0.gstatic.com", "encrypted-tbn1.gstatic.com", "encrypted-tbn2.gstatic.com", "encrypted-tbn3.gstatic.com",
+				"lh3.google.com", "lh3.googleusercontent.com", "lh5.googleusercontent.com", "streetviewpixels-pa.googleapis.com", "o.pki.goog",
+				// GitHub (Copilot sign-in and assets)
+				"github.com", "github.githubassets.com", "avatars.githubusercontent.com", "origin-tracker.githubusercontent.com",
+				// Microsoft / Bing sign-in and experiments
+				"login.live.com", "login.microsoftonline.com", "default.exp-tas.com", "edgeservices.bing.com", "sydney.bing.com",
+				// third-party auth and challenge services of the AI sites
+				"cdn.auth0.com", "cdn.workos.com", "forwarder.workos.com", "frontend-apps-multi-region.workos.com",
+				"images.workoscdn.com", "setup.workos.com", "workos.imgix.net", "challenges.cloudflare.com",
+			},
+			Providers: []string{"malw", "comss", "geohide", "malw-cf", "dnsai"},
+			Note:      "Вход через Google/GitHub/Microsoft, шрифты и CDN, нужные AI-сервисам. Домены общие: правила на них затрагивают и остальные сайты на этих доменах"},
 		{ID: "work", Name: "Работа и разработка",
 			Domains: []string{
 				"notion.so", "notion.com", "notion.site", "notion.new", "notion-static.com",

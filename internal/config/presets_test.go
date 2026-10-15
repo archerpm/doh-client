@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +29,41 @@ func TestPresetsAreValidAndUnique(t *testing.T) {
 		if _, ok := seen[d]; !ok {
 			t.Errorf("%s is missing from the presets", d)
 		}
+	}
+}
+
+// The reference list (one host per line, "suffix:" marks a suffix) must stay
+// covered: rules match a domain and all its subdomains.
+func TestPresetsCoverReferenceList(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "reference-domains.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var have []string
+	for _, p := range Presets() {
+		have = append(have, p.Domains...)
+	}
+	covered := func(host string) bool {
+		for _, d := range have {
+			if host == d || strings.HasSuffix(host, "."+d) {
+				return true
+			}
+		}
+		return false
+	}
+	n := 0
+	for _, line := range strings.Split(string(b), "\n") {
+		host := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "suffix:")))
+		if host == "" {
+			continue
+		}
+		n++
+		if !covered(host) {
+			t.Errorf("%s is not covered by any preset rule", host)
+		}
+	}
+	if n < 100 {
+		t.Fatalf("reference list looks truncated: %d entries", n)
 	}
 }
 
