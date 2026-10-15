@@ -619,6 +619,7 @@ type Status struct {
 	HostsSet  []string               `json:"hosts_domains,omitempty"`
 	LastError string                 `json:"last_error,omitempty"`
 	Warnings  []string               `json:"warnings,omitempty"`
+	Conflicts []string               `json:"conflicts,omitempty"` // warnings about programs that take over DNS; also in Warnings
 	Health    []resolver.HealthInfo  `json:"health"`
 	Events    []Event                `json:"events,omitempty"`
 	Stats     resolver.StatsSnapshot `json:"stats"`
@@ -643,7 +644,8 @@ func (d *Daemon) Status() Status {
 	st.SysDNS = d.sys.Status()
 	st.Warnings = append(st.Warnings, st.SysDNS.Warnings...)
 	if d.conflicts != nil && st.Active && st.Mode == config.ModeProxy {
-		st.Warnings = append(st.Warnings, conflict.Warnings(d.conflicts.Names())...)
+		st.Conflicts = conflict.Warnings(d.conflicts.Names())
+		st.Warnings = append(st.Warnings, st.Conflicts...)
 	}
 	st.Health = d.router.Health()
 	st.Events = d.events.Snapshot()

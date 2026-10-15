@@ -36,6 +36,9 @@ func TestStatusWarnsAboutDNSTakingPrograms(t *testing.T) {
 	if !has() {
 		t.Fatal("active proxy mode with sing-box running must warn")
 	}
+	if st := d.Status(); len(st.Conflicts) != 1 || !strings.Contains(st.Conflicts[0], "sing-box") {
+		t.Fatalf("Conflicts = %v", st.Conflicts)
+	}
 	cfg.Mode = config.ModeHosts
 	d.setCfg(cfg)
 	if has() {

@@ -21,6 +21,23 @@ function toast(msg, bad = false) {
   setTimeout(() => t.remove(), bad ? 8000 : 3000);
 }
 
+// warnings that opened a popup in this window: each text pops up once per GUI run
+const shownPopups = new Set();
+function showConflicts(list) {
+  const fresh = list.filter((w) => !shownPopups.has(w));
+  if (!fresh.length || $("#popup")) return;
+  fresh.forEach((w) => shownPopups.add(w));
+  const box = document.createElement("div");
+  box.id = "popup";
+  box.innerHTML = `<div class="popup-card" role="alertdialog" aria-labelledby="popupTitle" aria-describedby="popupBody"><h2 id="popupTitle">Возможен конфликт DNS</h2><div id="popupBody">${fresh.map((w) => `<p>${esc(w)}</p>`).join("")}</div><button class="btn" type="button">Понятно</button></div>`;
+  const close = () => { box.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  $("button", box).addEventListener("click", close);
+  document.addEventListener("keydown", onKey);
+  document.body.append(box);
+  $("button", box).focus();
+}
+
 const S = { state: null, cfg: null, presets: [], tab: "overview", logSeq: 0, log: [], logPaused: false, board: [], provTest: {}, provTestAt: 0, provTesting: false };
 // numbers roll to their new value instead of jumping (skipped with reduced motion)
 function tween(node, to) {
@@ -119,7 +136,9 @@ async function refresh() {
         : "Правил пока нет: все запросы идут через выбранный DoH-туннель. Добавьте наборы на вкладке «Правила».";
   let al = "";
   if (s.last_error) al += `<div class="alert bad">${esc(s.last_error)}</div>`;
-  for (const w of s.warnings || []) al += `<div class="alert">${esc(w)}</div>`;
+  const conflicts = s.conflicts || [];
+  for (const w of s.warnings || []) if (!conflicts.includes(w)) al += `<div class="alert">${esc(w)}</div>`;
+  showConflicts(conflicts);
   $("#alerts").innerHTML = al;
   renderEvents(s.events || []);
   const q = s.stats.queries || 0;
