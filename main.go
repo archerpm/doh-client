@@ -20,7 +20,7 @@ import (
 	"github.com/archerpm/doh-client/internal/svc"
 )
 
-var version = "1.1.1"
+var version = "1.1.2"
 
 // attachConsoleCLI is a hook for testing CLI console attachment.
 var attachConsoleCLI = attachConsole
