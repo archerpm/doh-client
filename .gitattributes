@@ -1,0 +1,3 @@
+# Go sources and shell scripts stay LF on every system (gofmt rejects CRLF on the Windows runner).
+*.go text eol=lf
+*.sh text eol=lf
