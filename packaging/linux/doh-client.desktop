@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DoH Client
+Comment=DNS-over-HTTPS client for bypassing geo-blocking
+Exec=/usr/bin/doh-client
+Icon=doh-client
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=doh-client

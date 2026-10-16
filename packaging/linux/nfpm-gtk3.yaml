@@ -1,0 +1,39 @@
+# deb + rpm for the GTK3 / WebKit2GTK 4.1 build (Ubuntu 22.04, Debian 12, Fedora with webkit2gtk4.1).
+# Built by CI with: BIN=<binary> VERSION=<x.y.z> nfpm package -f packaging/linux/nfpm-gtk3.yaml -p deb|rpm
+name: doh-client-gtk3
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Archer <noreply@users.noreply.github.com>
+description: |
+  DoH Client (GTK3 build): local DNS-over-HTTPS resolver for bypassing geo-blocks.
+  One DoH provider chosen by the user; GUI plus a system service.
+homepage: https://github.com/archerpm/doh-client
+license: MIT
+conflicts:
+  - doh-client
+contents:
+  - src: ${BIN}
+    dst: /usr/bin/doh-client
+    file_info:
+      mode: 0755
+  - src: packaging/linux/doh-client.desktop
+    dst: /usr/share/applications/doh-client.desktop
+  - src: internal/svc/assets/doh-client.png
+    dst: /usr/share/icons/hicolor/256x256/apps/doh-client.png
+  - src: LICENSE
+    dst: /usr/share/doc/doh-client-gtk3/LICENSE
+scripts:
+  postinstall: packaging/linux/postinst.sh
+  preremove: packaging/linux/prerm.sh
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.1-0
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1

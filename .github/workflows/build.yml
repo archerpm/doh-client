@@ -92,9 +92,117 @@ jobs:
           name: macos
           path: dist/DoH-Client-macos.zip
 
+  packages:
+    needs: [linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-gtk4
+          path: bin/gtk4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-gtk3
+          path: bin/gtk3
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+      - name: Build deb and rpm
+        run: |
+          VERSION=$(grep -oP 'var version = "\K[^"]+' main.go); export VERSION
+          mkdir -p pkg
+          for v in gtk4 gtk3; do
+            if [ "$v" = gtk4 ]; then BIN=bin/gtk4/doh-client-linux-amd64; else BIN=bin/gtk3/doh-client-linux-amd64-gtk3; fi
+            export BIN
+            for f in deb rpm; do "$(go env GOPATH)/bin/nfpm" package -f "packaging/linux/nfpm-$v.yaml" -p "$f" -t pkg/; done
+          done
+          ls -la pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: pkg/*
+
+  # Real Ubuntu VMs have systemd, so the service itself is installed and removed here.
+  packages-test-host:
+    needs: [packages]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            pkg: doh-client
+          - runner: ubuntu-22.04
+            pkg: doh-client-gtk3
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: pkg
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./pkg/${{ matrix.pkg }}_*_amd64.deb
+          doh-client version
+          test -x /usr/bin/doh-client
+          if ldd /usr/bin/doh-client | grep "not found"; then exit 1; fi
+      - name: Service install, status, API
+        run: |
+          sudo doh-client service install --owner "$(id -u)"
+          sleep 5
+          doh-client service status
+          systemctl is-active doh-client
+          doh-client status --json | head -20
+      - name: Remove restores everything
+        run: |
+          sudo apt-get remove -y ${{ matrix.pkg }}
+          test ! -e /usr/bin/doh-client
+          test ! -e /usr/local/lib/doh-client/doh-client
+          if systemctl is-active --quiet doh-client; then echo "service still active"; exit 1; fi
+          cat /etc/resolv.conf
+
+  # Containers have no systemd: install, dependency resolution and removal only.
+  packages-test-container:
+    needs: [packages]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:13
+            install: apt-get update && apt-get install -y ./pkg/doh-client_*_amd64.deb
+            remove: apt-get remove -y doh-client
+          - image: debian:12
+            install: apt-get update && apt-get install -y ./pkg/doh-client-gtk3_*_amd64.deb
+            remove: apt-get remove -y doh-client-gtk3
+          - image: fedora:42
+            install: dnf install -y ./pkg/doh-client-[0-9]*.x86_64.rpm
+            remove: dnf remove -y doh-client
+          - image: fedora:42
+            install: dnf install -y ./pkg/doh-client-gtk3-*.x86_64.rpm
+            remove: dnf remove -y doh-client-gtk3
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: pkg
+      - name: Install
+        run: |
+          ${{ matrix.install }}
+          doh-client version
+          if ldd /usr/bin/doh-client | grep "not found"; then exit 1; fi
+      - name: Remove
+        run: |
+          ${{ matrix.remove }}
+          test ! -e /usr/bin/doh-client
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, macos]
+    needs: [windows, linux, macos, packages, packages-test-host, packages-test-container]
     runs-on: ubuntu-latest
     permissions:
       contents: write
