@@ -12,3 +12,6 @@
 .idea/
 Thumbs.db
 .DS_Store
+
+# local instructions for the coding assistant, not published
+/CLAUDE.md
