@@ -14,6 +14,7 @@ func knownFiles() []string {
 		filepath.Join(d, "owner"), filepath.Join(d, "hosts.original"), filepath.Join(d, "cli-error.log"),
 		filepath.Join(d, "service.log"), filepath.Join(d, "service.log.old"),
 		filepath.Join(d, "config.json.tmp"), filepath.Join(d, "dns-backup.json.tmp"),
+		filepath.Join(d, "service-check.json"), filepath.Join(d, "service-check.json.tmp"),
 	}
 }
 
