@@ -116,7 +116,7 @@ jobs:
           mkdir -p pkg
           for v in gtk4 gtk3; do
             if [ "$v" = gtk4 ]; then BIN=bin/gtk4/doh-client-linux-amd64; else BIN=bin/gtk3/doh-client-linux-amd64-gtk3; fi
-            export BIN
+            mkdir -p pkg-bin && cp "$BIN" pkg-bin/doh-client
             for f in deb rpm; do "$(go env GOPATH)/bin/nfpm" package -f "packaging/linux/nfpm-$v.yaml" -p "$f" -t pkg/; done
           done
           ls -la pkg

@@ -1,5 +1,5 @@
 # deb + rpm for the GTK3 / WebKit2GTK 4.1 build (Ubuntu 22.04, Debian 12, Fedora with webkit2gtk4.1).
-# Built by CI with: BIN=<binary> VERSION=<x.y.z> nfpm package -f packaging/linux/nfpm-gtk3.yaml -p deb|rpm
+# Built by CI (the binary is copied to pkg-bin/doh-client first) with: VERSION=<x.y.z> nfpm package -f packaging/linux/nfpm-gtk3.yaml -p deb|rpm
 name: doh-client-gtk3
 arch: amd64
 platform: linux
@@ -15,7 +15,7 @@ license: MIT
 conflicts:
   - doh-client
 contents:
-  - src: ${BIN}
+  - src: pkg-bin/doh-client
     dst: /usr/bin/doh-client
     file_info:
       mode: 0755

@@ -1,5 +1,5 @@
 # deb + rpm for the GTK4 / WebKitGTK 6.0 build (Ubuntu 24.04+, Debian 13+, Fedora 40+).
-# Built by CI with: BIN=<binary> VERSION=<x.y.z> nfpm package -f packaging/linux/nfpm-gtk4.yaml -p deb|rpm
+# Built by CI (the binary is copied to pkg-bin/doh-client first) with: VERSION=<x.y.z> nfpm package -f packaging/linux/nfpm-gtk4.yaml -p deb|rpm
 name: doh-client
 arch: amd64
 platform: linux
@@ -15,7 +15,7 @@ license: MIT
 conflicts:
   - doh-client-gtk3
 contents:
-  - src: ${BIN}
+  - src: pkg-bin/doh-client
     dst: /usr/bin/doh-client
     file_info:
       mode: 0755
