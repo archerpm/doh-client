@@ -386,3 +386,22 @@ func TestWaiterCancellation(t *testing.T) {
 		t.Fatalf("waiter not released on its own deadline: %v rcode=%d", time.Since(start), m.Rcode)
 	}
 }
+
+// An unsupported EDNS version gets BADVERS even for a name that a rule would
+// otherwise answer with a synthetic empty reply (AAAA suppression).
+func TestBadVersBeatsRuleSuppression(t *testing.T) {
+	g := &fake{fn: func(q *dns.Msg) (*dns.Msg, error) { return aResp(q, "193.233.112.67", 60), nil }}
+	r := setup(t, map[string]*fake{"g": g}, func(c *config.Config) {
+		c.ActiveProvider = "g"
+		c.Rules = []config.Rule{{Domain: "chatgpt.com", Enabled: true}}
+	})
+	q := query("chatgpt.com", dns.TypeAAAA)
+	q.SetEdns0(1232, false)
+	q.IsEdns0().SetVersion(1)
+	if m := r.Resolve(context.Background(), q, "c"); m.Rcode != dns.RcodeBadVers {
+		t.Fatalf("rule + EDNS v1 should get BADVERS, got rcode %d", m.Rcode)
+	}
+	if g.calls.Load() != 0 {
+		t.Fatal("the provider was asked for a request that is refused")
+	}
+}

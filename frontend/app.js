@@ -397,9 +397,14 @@ function save(mut, okMsg) {
   if (!S.cfg) { toast("Служба недоступна: настройки сейчас нельзя изменить", true); return Promise.resolve(false); }
   const run = async () => {
     if (!S.cfg) { toast("Служба недоступна: настройки сейчас нельзя изменить", true); return false; }
-    const next = structuredClone(S.cfg);
-    next.rules ??= [];
+    let next;
     try {
+      // the tray menu and the CLI change the service's config behind the window's back:
+      // edit its current copy, otherwise this save would put the old choice back
+      const fresh = await call("GetConfig");
+      fresh.rules ??= []; fresh.providers ??= []; fresh.default_chain ??= [];
+      S.cfg = fresh; cfgGen++;
+      next = structuredClone(fresh);
       mut(next);
       S.cfg = await call("SaveConfig", next); cfgGen++;
       if (okMsg) toast(okMsg);

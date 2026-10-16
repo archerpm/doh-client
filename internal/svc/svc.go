@@ -74,10 +74,15 @@ func (p *program) Stop(s service.Service) error {
 		p.cancel()
 		<-p.done
 	}
+	var stopErr error
 	if p.d != nil {
-		p.d.Stop() // restores system DNS
+		stopErr = p.d.Stop() // restores system DNS
 	}
 	_ = os.Remove(paths.TokenFile())
+	if stopErr != nil {
+		log.Printf("service stopped, system DNS NOT restored: %v", stopErr)
+		return stopErr
+	}
 	log.Printf("service stopped")
 	return nil
 }
@@ -172,6 +177,15 @@ func Install(owner string) error {
 				return fmt.Errorf("старая служба не остановилась, обновление прервано: %w", err)
 			}
 		}
+		// The old service reports a clean stop even when it could not put the
+		// system DNS back; the backup on disk is then the only proof. Do not drop
+		// the registration (and risk failing to start any service) in that state.
+		if m := sysdns.New(paths.BackupFile()); m.HasBackup() {
+			if err := m.Restore(); err != nil {
+				_ = s.Start()
+				return fmt.Errorf("не удалось вернуть исходный DNS, обновление прервано, старая служба запущена снова: %w", err)
+			}
+		}
 		_ = s.Uninstall()
 	}
 	if !samePath(self, dst) {
@@ -191,6 +205,9 @@ func Install(owner string) error {
 
 // Uninstall stops (which restores DNS) and removes the service and its binary.
 func Uninstall() error {
+	if err := secureIfPresent(); err != nil {
+		return err
+	}
 	s, err := newService(paths.InstallPath())
 	if err != nil {
 		return err
@@ -259,6 +276,9 @@ func Status() string {
 // RestoreDNS is an emergency command (`doh-client restore-dns`). A running
 // service would re-apply its DNS within seconds, so it is stopped first.
 func RestoreDNS() error {
+	if err := secureIfPresent(); err != nil {
+		return err
+	}
 	if s, err := newService(paths.InstallPath()); err == nil {
 		if st, _ := s.Status(); st == service.StatusRunning {
 			if err := stopService(s); err != nil {
@@ -272,6 +292,22 @@ func RestoreDNS() error {
 		errs = append(errs, hosts.Write(hosts.Path(), nil))
 	}
 	return errors.Join(errs...)
+}
+
+// secureIfPresent vets the state directory before a DNS backup in it is applied
+// with administrator rights: a directory that someone else prepared must not be
+// trusted. Without a directory there is no backup, so nothing is created.
+func secureIfPresent() error {
+	if _, err := os.Lstat(paths.StateDir()); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("state directory: %w", err)
+	}
+	if err := paths.SecureStateDir(); err != nil {
+		return fmt.Errorf("state directory: %w", err)
+	}
+	return nil
 }
 
 // removeBinary deletes the installed binary; the service process may hold it

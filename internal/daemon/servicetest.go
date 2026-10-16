@@ -160,6 +160,18 @@ func (d *Daemon) StartServiceTest(providerID string) error {
 	s.cancel = cancel
 	s.state.Running, s.state.Provider, s.state.Done, s.state.Total, s.state.Error = true, providerID, 0, 0, ""
 	s.mu.Unlock()
+	// The bypass may have been switched on after the check at the top: SetEnabled
+	// cancels only a check that is already registered, so look again now.
+	d.mu.Lock()
+	nowActive := d.active
+	d.mu.Unlock()
+	if nowActive {
+		cancel()
+		s.mu.Lock()
+		s.state.Running, s.cancel = false, nil
+		s.mu.Unlock()
+		return ErrBypassActive
+	}
 
 	o.Progress = func(done, total int) {
 		s.mu.Lock()
@@ -193,6 +205,9 @@ func (d *Daemon) StartServiceTest(providerID string) error {
 		for _, r := range res {
 			services, bad := []string{}, map[string]bool{}
 			for _, n := range r.Unreachable {
+				bad[n] = true
+			}
+			for _, n := range r.Unchecked { // TLS was not tried: neither "opens" nor "does not"
 				bad[n] = true
 			}
 			for _, n := range r.Services {

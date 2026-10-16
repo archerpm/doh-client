@@ -81,7 +81,7 @@ func (s *Server) guard(h http.Handler) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		r.Body = http.MaxBytesReader(w, r.Body, config.MaxConfigBytes)
 		h.ServeHTTP(w, r)
 	})
 }

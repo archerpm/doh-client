@@ -9,6 +9,11 @@ import (
 // MaxListDomains bounds how many domains one published list may contribute.
 const MaxListDomains = 20000
 
+// MaxConfigBytes is the largest serialized config that the service accepts. The
+// CLI import and the API use the same number, so a file that passes one cannot be
+// refused by the other; a full list of MaxListDomains rules stays well below it.
+const MaxConfigBytes = 4 << 20
+
 // ParseDomainList reads a published domain list. It accepts one domain per line
 // and hosts-file lines ("1.2.3.4 example.com"); "#" starts a comment. Entries
 // that are not valid domains, plain addresses and "localhost" are skipped. The

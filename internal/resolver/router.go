@@ -291,6 +291,11 @@ func (r *Router) resolveOnce(ctx context.Context, q *dns.Msg) Result {
 
 	chain := st.chain
 	ruleDom, ruleChain, isRule := st.matchRule(name)
+	// RFC 6891 §6.1.3: an unsupported EDNS version is answered with BADVERS before
+	// anything else, a rule-based suppression included, and never from the cache.
+	if o := q.IsEdns0(); o != nil && o.Version() != 0 {
+		return Result{Msg: reply(q, dns.RcodeBadVers), Rule: ruleDom, Synth: true}
+	}
 	if isRule {
 		r.stats.RuleHits.Add(1)
 		if len(ruleChain) > 0 {
@@ -304,10 +309,6 @@ func (r *Router) resolveOnce(ctx context.Context, q *dns.Msg) Result {
 		}
 	}
 
-	if o := q.IsEdns0(); o != nil && o.Version() != 0 {
-		m := reply(q, dns.RcodeBadVers) // RFC 6891 §6.1.3: before the cache, never answer v1+ from it
-		return Result{Msg: m, Rule: ruleDom, Synth: true}
-	}
 	key := cacheKey(name, qq.Qtype, qq.Qclass, q)
 	r.mu.Lock()
 	var cached *dns.Msg

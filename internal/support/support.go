@@ -11,6 +11,7 @@ package support
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"sort"
 	"strings"
@@ -141,6 +142,9 @@ type ProviderResult struct {
 	// handshake (only with Options.Reach): the DNS says "proxied" but the site
 	// would not open from here.
 	Unreachable []string
+	// Unchecked are the Services for which no TLS handshake could be tried (no
+	// usable proxy address): they are neither confirmed nor blamed.
+	Unchecked []string
 
 	votes map[string]int
 	runs  int
@@ -259,6 +263,11 @@ func Run(ctx context.Context, o Options) ([]ProviderResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Without a single answer from the ordinary DNS there is nothing to tell a proxy
+	// address from the real address of a site: an unknown must not pass for a proof.
+	if len(ref16) == 0 {
+		return nil, errors.New("эталонный DNS не ответил (UDP 8.8.8.8 / 1.1.1.1 недоступны): без него нельзя отличить адрес прокси от обычного")
+	}
 
 	var boot *doh.Bootstrap
 	if o.Ask == nil {
@@ -364,7 +373,7 @@ func Run(ctx context.Context, o Options) ([]ProviderResult, error) {
 			}
 		}
 		if o.Reach != nil {
-			res.Unreachable = checkReach(ctx, o, p, res, learnPool(runs[len(runs)-1][p.ID], ref16, o.MinApex), runs[len(runs)-1][p.ID], step)
+			res.Unreachable, res.Unchecked = checkReach(ctx, o, p, res, learnPool(runs[len(runs)-1][p.ID], ref16, o.MinApex), runs[len(runs)-1][p.ID], step)
 		}
 		out = append(out, res)
 	}
@@ -377,13 +386,20 @@ func Run(ctx context.Context, o Options) ([]ProviderResult, error) {
 // checkReach opens a TLS connection to the proxy address of up to two proxied
 // hosts of every supported service; a service none of them answers for is
 // unreachable. step is called once per catalogue service (supported or not).
-func checkReach(ctx context.Context, o Options, p config.Provider, res ProviderResult, pl pool, last map[string][]netip.Addr, step func()) []string {
+func checkReach(ctx context.Context, o Options, p config.Provider, res ProviderResult, pl pool, last map[string][]netip.Addr, step func()) (bad, unchecked []string) {
 	supported := map[string]bool{}
 	for _, n := range res.Services {
 		supported[n] = true
 	}
+	// The proxy is chosen by the name in the ClientHello, so any address of the pool
+	// serves every host: it stands in when the last run got no answer for a host.
+	var spare netip.Addr
+	for a := range pl.addrs {
+		if !spare.IsValid() || a.Less(spare) {
+			spare = a
+		}
+	}
 	var mu sync.Mutex
-	var bad []string
 	byName := map[string]config.Service{}
 	var names []string
 	for _, s := range o.Services {
@@ -404,15 +420,23 @@ func checkReach(ctx context.Context, o Options, p config.Provider, res ProviderR
 			if len(targets) == 2 || !res.Proxied(h) {
 				continue
 			}
+			found := false
 			for _, a := range last[h] {
 				if a.Is4() && pl.has(a) {
 					targets = append(targets, target{h, a})
+					found = true
 					break
 				}
 			}
+			if !found && spare.IsValid() {
+				targets = append(targets, target{h, spare})
+			}
 		}
 		if len(targets) == 0 {
-			return // no usable answer in the last run: nothing to test, nothing to blame
+			mu.Lock()
+			unchecked = append(unchecked, name) // nothing could be tried: not "reachable" either
+			mu.Unlock()
+			return
 		}
 		for _, t := range targets {
 			if o.Reach(ctx, p.ID, t.host, t.ip) {
@@ -427,7 +451,8 @@ func checkReach(ctx context.Context, o Options, p config.Provider, res ProviderR
 		mu.Unlock()
 	})
 	sort.Strings(bad)
-	return bad
+	sort.Strings(unchecked)
+	return bad, unchecked
 }
 
 func errorsFor(hosts []string) map[string]RawAnswer {

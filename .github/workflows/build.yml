@@ -24,7 +24,9 @@ jobs:
         run: |
           if (gofmt -l .) { gofmt -l .; throw "gofmt" }
           go vet ./...
+          if ($LASTEXITCODE) { throw "go vet failed" }
           go test ./...
+          if ($LASTEXITCODE) { throw "go test failed" }
       - name: Build
         shell: pwsh
         run: ./scripts/build-windows.ps1
@@ -151,18 +153,29 @@ jobs:
           if ldd /usr/bin/doh-client | grep "not found"; then exit 1; fi
       - name: Service install, status, API
         run: |
+          { resolvectl dns; resolvectl domain; } > /tmp/dns.before
+          cat /tmp/dns.before
           sudo doh-client service install --owner "$(id -u)"
           sleep 5
           doh-client service status
           systemctl is-active doh-client
           doh-client status --json | head -20
-      - name: Remove restores everything
+      - name: Enabling the bypass redirects DNS to the client and names still resolve
+        run: |
+          doh-client enable
+          sleep 5
+          { resolvectl dns; resolvectl domain; } | tee /tmp/dns.during
+          grep -q "127.0.0.1" /tmp/dns.during
+          getent hosts example.com
+      - name: Remove puts the original DNS back exactly
         run: |
           sudo apt-get remove -y ${{ matrix.pkg }}
           test ! -e /usr/bin/doh-client
           test ! -e /usr/local/lib/doh-client/doh-client
           if systemctl is-active --quiet doh-client; then echo "service still active"; exit 1; fi
-          cat /etc/resolv.conf
+          { resolvectl dns; resolvectl domain; } > /tmp/dns.after
+          diff /tmp/dns.before /tmp/dns.after
+          getent hosts example.com
 
   # Containers have no systemd: install, dependency resolution and removal only.
   packages-test-container:

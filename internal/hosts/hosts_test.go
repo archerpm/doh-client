@@ -61,3 +61,23 @@ func TestWriteBacksUpOriginalOnce(t *testing.T) {
 		t.Fatal("temp file left behind")
 	}
 }
+
+// A failed backup of the original means no change at all: the backup is the only way back.
+func TestWriteWithoutBackupChangesNothing(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "hosts")
+	notDir := filepath.Join(dir, "plain-file")
+	if err := os.WriteFile(notDir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	BackupPath = filepath.Join(notDir, "hosts.original") // its parent is a file: cannot be created
+	defer func() { BackupPath = "" }()
+	orig := []byte("10.0.0.1 nas\n")
+	os.WriteFile(p, orig, 0o644)
+	if err := Write(p, map[string][]netip.Addr{"a.com": {netip.MustParseAddr("1.1.1.1")}}); err == nil {
+		t.Fatal("Write must fail when the original cannot be saved")
+	}
+	if b, _ := os.ReadFile(p); string(b) != string(orig) {
+		t.Fatalf("hosts changed without a backup: %q", b)
+	}
+}

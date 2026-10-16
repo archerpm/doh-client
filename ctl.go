@@ -186,12 +186,12 @@ func ctlWithClient(cl *api.Client, args []string) (int, bool) {
 				defer f.Close()
 				r = f
 			}
-			raw, err := io.ReadAll(io.LimitReader(r, 4<<20+1))
+			raw, err := io.ReadAll(io.LimitReader(r, config.MaxConfigBytes+1))
 			if err != nil {
 				return fail(err)
 			}
-			if len(raw) > 4<<20 {
-				return fail(fmt.Errorf("файл больше 4 МБ"))
+			if len(raw) > config.MaxConfigBytes {
+				return fail(fmt.Errorf("файл больше %d МБ", config.MaxConfigBytes>>20))
 			}
 			var cfg config.Config
 			dec := json.NewDecoder(bytes.NewReader(raw))

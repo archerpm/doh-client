@@ -16,6 +16,10 @@ if [ -x "$SERVICE_BIN" ]; then
     fi
 else
     # no service installed, but a leftover backup may still point DNS at us
-    /usr/bin/doh-client restore-dns >/dev/null 2>&1 || true
+    if ! out=$(/usr/bin/doh-client restore-dns 2>&1); then
+        echo "doh-client: could not restore the system DNS: $out" >&2
+        echo "doh-client: the package is kept so that 'sudo doh-client restore-dns' can be run again" >&2
+        exit 1
+    fi
 fi
 exit 0

@@ -5,6 +5,7 @@ package sysdns
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -121,6 +122,18 @@ func links() []net.Interface {
 	return out
 }
 
+// allLinks lists every existing interface except loopback, up or down.
+func allLinks() []net.Interface {
+	ifs, _ := net.Interfaces()
+	var out []net.Interface
+	for _, i := range ifs {
+		if i.Flags&net.FlagLoopback == 0 {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 func (l linuxDNS) ensure(servers []string, b *Backup, save func() error) ([]string, error) {
 	if usesResolved() {
 		return l.ensureResolved(servers, b, save)
@@ -164,7 +177,12 @@ func (linuxDNS) ensureResolved(servers []string, b *Backup, save func() error) (
 			continue
 		}
 		if _, ok := b.Items[li.Name]; !ok {
-			doms, _ := resolvectlList("domain", li.Name)
+			doms, derr := resolvectlList("domain", li.Name)
+			if derr != nil {
+				// An unread list would be saved as empty and lost for good: leave the link alone.
+				errs = append(errs, fmt.Errorf("%s: не удалось прочитать домены поиска, интерфейс не изменён: %w", li.Name, derr))
+				continue
+			}
 			b.Items[li.Name] = &Item{Key: li.Name, Name: li.Name, V4: cur, Domains: doms, Auto4: hadRouteAll(doms)}
 			if err := save(); err != nil {
 				return warnings, err
@@ -304,8 +322,10 @@ func replaceFile(path string, content []byte, link string) error {
 
 func (linuxDNS) restore(b *Backup) error {
 	var errs []error
+	// An interface that is administratively down still keeps its resolved settings:
+	// it must be restored too, or its original servers are lost with the backup.
 	present := map[string]bool{}
-	for _, li := range links() {
+	for _, li := range allLinks() {
 		present[li.Name] = true
 	}
 	for name, it := range b.Items {
@@ -330,16 +350,17 @@ func (linuxDNS) restore(b *Backup) error {
 	if fb := b.ResolvConf; fb != nil {
 		var err error
 		switch {
+		// Always the real resolv.conf, never a path taken from the backup file.
 		case fb.Link != "":
-			err = replaceFile(fb.Path, nil, fb.Link)
+			err = replaceFile(resolvConf, nil, fb.Link)
 		case fb.Missing:
-			if cur, rerr := os.ReadFile(fb.Path); rerr == nil {
+			if cur, rerr := os.ReadFile(resolvConf); rerr == nil {
 				if _, ours := managedServers(cur); ours {
-					err = os.Remove(fb.Path)
+					err = os.Remove(resolvConf)
 				}
 			}
 		default:
-			err = replaceFile(fb.Path, fb.Content, "")
+			err = replaceFile(resolvConf, fb.Content, "")
 		}
 		if err != nil {
 			errs = append(errs, err)

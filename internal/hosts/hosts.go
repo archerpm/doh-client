@@ -3,6 +3,7 @@ package hosts
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -90,24 +91,37 @@ func Write(path string, entries map[string][]netip.Addr) error {
 		return nil
 	}
 	if BackupPath != "" && len(entries) > 0 && !bytes.Contains(orig, []byte(begin)) {
-		_ = os.MkdirAll(filepath.Dir(BackupPath), 0o755)
-		_ = os.WriteFile(BackupPath, orig, 0o600)
+		// The copy of the original is the only way back: no copy, no change.
+		if err := os.MkdirAll(filepath.Dir(BackupPath), 0o755); err != nil {
+			return fmt.Errorf("hosts: backup directory: %w", err)
+		}
+		if err := os.WriteFile(BackupPath, orig, 0o600); err != nil {
+			return fmt.Errorf("hosts: backup of the original: %w", err)
+		}
 	}
 	tmp := path + ".doh-client.tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-	if err == nil {
-		_, werr := f.Write(out)
-		serr := f.Sync()
-		cerr := f.Close()
-		if werr == nil && serr == nil && cerr == nil {
-			if err = os.Rename(tmp, path); err == nil {
-				return nil
-			}
-		}
-		_ = os.Remove(tmp)
+	if err != nil {
+		return err
 	}
-	// Fallback: in place (bind mounts, read-only parent directory).
-	return os.WriteFile(path, out, mode)
+	_, werr := f.Write(out)
+	serr := f.Sync()
+	cerr := f.Close()
+	if err := errors.Join(werr, serr, cerr); err != nil {
+		_ = os.Remove(tmp)
+		return err // a failed write (disk full) must never reach the real file
+	}
+	rerr := os.Rename(tmp, path)
+	if rerr == nil {
+		return nil
+	}
+	_ = os.Remove(tmp)
+	// Only a refused rename (a bind-mounted /etc/hosts in a container) falls back
+	// to writing in place; the new content is known to be complete at this point.
+	if err := os.WriteFile(path, out, mode); err != nil {
+		return fmt.Errorf("%w (rename: %v)", err, rerr)
+	}
+	return nil
 }
 
 // BackupPath receives a copy of the original hosts file before the first change.

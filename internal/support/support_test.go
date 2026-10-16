@@ -227,3 +227,85 @@ func TestRunReach(t *testing.T) {
 		t.Errorf("progress ended at %d of %d, want %d", last, total, want)
 	}
 }
+
+// TestRunRefUnavailable: when the ordinary DNS answers nothing, a proxy address
+// cannot be told from a real one, so the run is refused instead of guessing.
+func TestRunRefUnavailable(t *testing.T) {
+	_, err := Run(context.Background(), Options{
+		Services:  []config.Service{{Name: "x", Hosts: []string{"a.test", "b.test", "c.test"}}},
+		Providers: []config.Provider{{ID: "p"}},
+		Repeat:    1,
+		Workers:   2,
+		Ref:       func(context.Context, string) []netip.Addr { return nil },
+		Ask: func(_ context.Context, _ config.Provider, h string) (*dns.Msg, error) {
+			return reply(h, "193.233.112.68"), nil
+		},
+	})
+	if err == nil {
+		t.Fatal("a run without any reference answer must fail")
+	}
+}
+
+// reachScenario runs three rounds where ChatGPT's host gets no answer in the last
+// one (failAll: nobody does) and reports what Reach was asked and the result.
+func reachScenario(t *testing.T, failAll bool) (ProviderResult, map[string]string) {
+	t.Helper()
+	var mu sync.Mutex
+	calls := map[string]int{}
+	tested := map[string]string{}
+	res, err := Run(context.Background(), Options{
+		Services: []config.Service{
+			{Name: "Claude", Hosts: []string{"claude.ai", "api.anthropic.com"}},
+			{Name: "ChatGPT", Hosts: []string{"chatgpt.com"}},
+		},
+		Extra:     []string{"e1.test", "e2.test", "e3.test"},
+		Providers: []config.Provider{{ID: "p"}},
+		Repeat:    3,
+		Workers:   2,
+		Ref:       func(context.Context, string) []netip.Addr { return ip("93.184.216.34") },
+		Ask: func(_ context.Context, _ config.Provider, h string) (*dns.Msg, error) {
+			mu.Lock()
+			calls[h]++
+			n := calls[h]
+			mu.Unlock()
+			if n >= 3 && (failAll || h == "chatgpt.com") {
+				return nil, context.DeadlineExceeded
+			}
+			return reply(h, "193.233.112.68"), nil
+		},
+		Reach: func(_ context.Context, _, host string, a netip.Addr) bool {
+			mu.Lock()
+			tested[host] = a.String()
+			mu.Unlock()
+			return true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res[0], tested
+}
+
+// TestRunReachSpareAddress: the last round has no answer for chatgpt.com, but the
+// proxy is chosen by name, so another address of the pool is used for the handshake.
+func TestRunReachSpareAddress(t *testing.T) {
+	r, tested := reachScenario(t, false)
+	if tested["chatgpt.com"] != "193.233.112.68" {
+		t.Fatalf("the handshake for chatgpt.com must use a pool address: %v", tested)
+	}
+	if len(r.Unchecked) != 0 || len(r.Unreachable) != 0 {
+		t.Fatalf("unchecked %v, unreachable %v", r.Unchecked, r.Unreachable)
+	}
+}
+
+// TestRunReachUnchecked: a service that was proxied in earlier rounds but has no
+// address at all in the last one is reported as not checked, not as reachable.
+func TestRunReachUnchecked(t *testing.T) {
+	r, tested := reachScenario(t, true)
+	if len(tested) != 0 {
+		t.Fatalf("nothing could be tried, yet Reach was called: %v", tested)
+	}
+	if len(r.Unchecked) != 2 || len(r.Unreachable) != 0 {
+		t.Fatalf("unchecked %v, unreachable %v", r.Unchecked, r.Unreachable)
+	}
+}

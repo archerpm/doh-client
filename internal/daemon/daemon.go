@@ -110,6 +110,7 @@ func (d *Daemon) Start() error {
 
 	// Crash recovery: a leftover backup while disabled means we died with DNS redirected.
 	recoverFailed := false
+	restoreErr := ""
 	if !cfg.Enabled && d.sys.HasBackup() {
 		log.Printf("restoring system DNS left over from previous run")
 		if err := d.sys.Restore(); err != nil {
@@ -132,7 +133,13 @@ func (d *Daemon) Start() error {
 				log.Printf("restoring system DNS left over from proxy mode")
 				if err := d.sys.Restore(); err != nil {
 					log.Printf("restore: %v", err)
-					d.setErr("не удалось вернуть исходный DNS: " + err.Error())
+					restoreErr = "не удалось вернуть исходный DNS: " + err.Error()
+					d.setErr(restoreErr)
+					// The OS still points at 127.0.0.1 and hosts mode runs no resolver:
+					// serve DNS anyway until the system DNS is restored.
+					if serr := d.srv.Start(cfg.Listen); serr != nil {
+						log.Printf("resolver for the leftover DNS redirect: %v", serr)
+					}
 				}
 			}
 		default:
@@ -154,6 +161,9 @@ func (d *Daemon) Start() error {
 	if cfg.Enabled || recoverFailed {
 		d.opMu.Lock()
 		err := d.enableLocked()
+		if err == nil && restoreErr != "" {
+			d.setErr(restoreErr) // enableLocked cleared it; the user must still see it
+		}
 		if err != nil {
 			log.Printf("enable on start: %v", err)
 			// Don't leave the OS pointing at a resolver that isn't running
@@ -170,7 +180,11 @@ func (d *Daemon) Start() error {
 }
 
 // Stop disables everything without persisting Enabled=false, so a reboot re-enables.
-func (d *Daemon) Stop() {
+//
+// It returns the error when the system DNS could not be put back: the caller must
+// not report a clean stop then, because the OS keeps pointing at a resolver that
+// is about to disappear. The backup stays on disk for the next start or `restore-dns`.
+func (d *Daemon) Stop() error {
 	d.mu.Lock()
 	if d.cancel != nil {
 		d.cancel() // stop maintenance first so it cannot re-apply DNS after restore
@@ -178,13 +192,27 @@ func (d *Daemon) Stop() {
 	d.mu.Unlock()
 	d.wg.Wait()
 	d.opMu.Lock()
-	if err := d.disableLocked(); err != nil {
-		// Process is exiting anyway; the backup stays on disk and is applied by
-		// the next start (crash recovery) or `restore-dns`.
-		d.srv.Stop()
+	defer d.opMu.Unlock()
+	var err error
+	for i := 0; i < stopRestoreTries; i++ {
+		if err = d.disableLocked(); err == nil {
+			return nil
+		}
+		log.Printf("restore system DNS on stop (try %d/%d): %v", i+1, stopRestoreTries, err)
+		if i < stopRestoreTries-1 {
+			time.Sleep(stopRestoreDelay)
+		}
 	}
-	d.opMu.Unlock()
+	d.srv.Stop()
+	return fmt.Errorf("системный DNS не восстановлен: %w", err)
 }
+
+// A network manager or a slow netsh can make the first restore fail; try again
+// before giving up on a stop.
+var (
+	stopRestoreTries = 3
+	stopRestoreDelay = time.Second
+)
 
 func (d *Daemon) config() *config.Config {
 	d.mu.Lock()
@@ -202,6 +230,10 @@ func (d *Daemon) SetEnabled(on bool) error {
 	var err error
 	if on {
 		err = d.enableLocked()
+		if err == nil {
+			// a service check asks other providers directly: never next to a running tunnel
+			d.CancelServiceTest()
+		}
 	} else {
 		err = d.disableLocked()
 	}
@@ -236,6 +268,13 @@ func (d *Daemon) setErr(e string) {
 // UpdateConfig validates, persists and applies a new config.
 func (d *Daemon) UpdateConfig(c *config.Config) error {
 	c = c.Clone()
+	// Normalize migrates an EMPTY active provider of an old config, but an explicit
+	// choice that is not in the list must not turn into another tunnel unnoticed.
+	if c.ActiveProvider != "" {
+		if _, ok := c.Provider(c.ActiveProvider); !ok {
+			return fmt.Errorf("неизвестный активный провайдер %q: туннель не меняется автоматически", c.ActiveProvider)
+		}
+	}
 	if err := c.Normalize(); err != nil {
 		return err
 	}

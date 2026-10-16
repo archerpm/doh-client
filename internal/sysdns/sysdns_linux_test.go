@@ -125,3 +125,33 @@ func TestResolvConfKeepsSearchAndReappliesOnServerChange(t *testing.T) {
 		t.Fatalf("restore: %q", got)
 	}
 }
+
+// A backup file is data from disk: the path inside it must never decide which file
+// is rewritten with administrator rights. Only the real resolv.conf is restored.
+func TestRestoreIgnoresPathFromBackup(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "resolv.conf")
+	other := filepath.Join(dir, "elsewhere")
+	os.WriteFile(real, []byte("# managed by doh-client\nnameserver 127.0.0.1\n"), 0o644)
+	os.WriteFile(other, []byte("precious\n"), 0o644)
+	old := resolvConf
+	resolvConf = real
+	t.Cleanup(func() { resolvConf = old })
+
+	b := &Backup{Items: map[string]*Item{}, ResolvConf: &FileBackup{Path: other, Content: []byte("nameserver 192.168.1.1\n")}}
+	if err := (linuxDNS{}).restore(b); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(other); string(got) != "precious\n" {
+		t.Fatalf("a file named in the backup was overwritten: %q", got)
+	}
+	if got, _ := os.ReadFile(real); string(got) != "nameserver 192.168.1.1\n" {
+		t.Fatalf("resolv.conf not restored: %q", got)
+	}
+}
+
+func TestAllLinksIncludesDownInterfaces(t *testing.T) {
+	if len(allLinks()) < len(links()) {
+		t.Fatal("allLinks must be a superset of links")
+	}
+}
