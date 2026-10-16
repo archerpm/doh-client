@@ -2,8 +2,11 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log"
 	"net/netip"
+	"os"
 	"sync"
 	"time"
 
@@ -43,6 +46,49 @@ type serviceTest struct {
 	mu     sync.Mutex
 	state  ServiceTestState
 	cancel context.CancelFunc
+	path   string // where the latest results are kept between runs; empty: memory only
+}
+
+// serviceTestFile is the name of the saved results, next to the config.
+const serviceTestFile = "service-check.json"
+
+// load restores the results saved by the previous run of the service.
+func (s *serviceTest) load() {
+	if s.path == "" {
+		return
+	}
+	b, err := os.ReadFile(s.path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("service check: %v", err)
+		}
+		return
+	}
+	var res []ServiceTestResult
+	if err := json.Unmarshal(b, &res); err != nil {
+		log.Printf("service check: %s: %v — ignored", s.path, err)
+		return
+	}
+	s.mu.Lock()
+	s.state.Results = res
+	s.mu.Unlock()
+}
+
+// save overwrites the file with the current results; the caller holds s.mu.
+func (s *serviceTest) save() {
+	if s.path == "" {
+		return
+	}
+	b, err := json.Marshal(s.state.Results)
+	if err == nil {
+		tmp := s.path + ".tmp"
+		if err = os.WriteFile(tmp, b, 0o644); err == nil {
+			err = os.Rename(tmp, s.path)
+		}
+	}
+	if err != nil {
+		log.Printf("service check: save: %v", err)
+	}
 }
 
 // serviceReachTimeout bounds one TLS handshake with a provider's proxy address.
@@ -158,6 +204,7 @@ func (d *Daemon) StartServiceTest(providerID string) error {
 			keep = append(keep, ServiceTestResult{Provider: r.Provider, Name: byID[r.Provider].Name, Services: services, Unreachable: unreachable, Hosts: r.Hosts, Errors: r.Errors, At: now})
 		}
 		s.state.Results = keep
+		s.save()
 	}()
 	return nil
 }

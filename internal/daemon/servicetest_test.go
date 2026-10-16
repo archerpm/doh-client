@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -122,5 +123,59 @@ func TestServiceTestCancelKeepsOldResults(t *testing.T) {
 	st := waitServiceTest(t, d)
 	if st.Error == "" || len(st.Results) != 1 {
 		t.Fatalf("a cancelled run must report why and keep the old results: %+v", st)
+	}
+}
+
+func TestServiceTestResultsPersist(t *testing.T) {
+	orig := runSupport
+	t.Cleanup(func() { runSupport = orig })
+	services := []string{"Claude"}
+	runSupport = func(ctx context.Context, o support.Options) ([]support.ProviderResult, error) {
+		var out []support.ProviderResult
+		for _, p := range o.Providers {
+			out = append(out, support.ProviderResult{Provider: p.ID, Services: services, Hosts: 4})
+		}
+		return out, nil
+	}
+	dir := t.TempDir()
+	newD := func() *Daemon {
+		d := New(config.NewStore(filepath.Join(dir, "config.json")), filepath.Join(dir, "backup.json"))
+		d.setCfg(config.Default())
+		return d
+	}
+
+	d := newD()
+	if err := d.StartServiceTest("geohide"); err != nil {
+		t.Fatal(err)
+	}
+	waitServiceTest(t, d)
+
+	d2 := newD() // a restart of the service
+	d2.svcTest.load()
+	st := d2.ServiceTest()
+	if len(st.Results) != 1 || st.Results[0].Provider != "geohide" || len(st.Results[0].Services) != 1 || st.Results[0].At.IsZero() {
+		t.Fatalf("results must survive a restart: %+v", st)
+	}
+
+	// a repeated check replaces the saved one
+	services = []string{"Claude", "ChatGPT"}
+	if err := d2.StartServiceTest("geohide"); err != nil {
+		t.Fatal(err)
+	}
+	waitServiceTest(t, d2)
+	d3 := newD()
+	d3.svcTest.load()
+	if st := d3.ServiceTest(); len(st.Results) != 1 || len(st.Results[0].Services) != 2 {
+		t.Fatalf("the new check must overwrite the old one: %+v", st)
+	}
+
+	// a broken file is ignored
+	if err := os.WriteFile(filepath.Join(dir, serviceTestFile), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d4 := newD()
+	d4.svcTest.load()
+	if st := d4.ServiceTest(); len(st.Results) != 0 {
+		t.Fatalf("broken file: %+v", st)
 	}
 }

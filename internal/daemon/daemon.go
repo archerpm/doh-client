@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -76,8 +77,12 @@ type Daemon struct {
 // New builds a daemon using the given store and DNS backup path.
 func New(store *config.Store, backupPath string) *Daemon {
 	r := resolver.New()
-	return &Daemon{store: store, router: r, srv: server.New(r), sys: sysdns.New(backupPath), hostsPath: hosts.Path(),
+	d := &Daemon{store: store, router: r, srv: server.New(r), sys: sysdns.New(backupPath), hostsPath: hosts.Path(),
 		conflicts: conflict.NewDetector(conflictScanEvery)}
+	if store != nil {
+		d.svcTest.path = filepath.Join(filepath.Dir(store.Path()), serviceTestFile)
+	}
+	return d
 }
 
 // Router exposes the router (diagnostics API).
@@ -101,6 +106,7 @@ func (d *Daemon) Start() error {
 	d.started = time.Now()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.mu.Unlock()
+	d.svcTest.load()
 
 	// Crash recovery: a leftover backup while disabled means we died with DNS redirected.
 	recoverFailed := false
