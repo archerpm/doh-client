@@ -4,7 +4,7 @@ GUI-клиент для Windows 10/11, macOS и Linux (Ubuntu 24.04 и 26.04 LTS
 
 ## Как это работает
 
-Провайдеры (comss, geohide, malw.link, dns-ai, mafioznik, bezmezhau) — это DNS-резолверы, которые для геоблокированных доменов возвращают IP своего **SNI-прокси**. Прокси читает имя домена из TLS ClientHello и пересылает соединение через зарубежный сервер без расшифровки, поэтому сертификат остаётся оригинальным. Остальные домены резолвятся как обычно.
+Провайдеры (comss, geohide, malw.link, dns-ai, mafioznik, bezmezhau, WebShift) — это DNS-резолверы, которые для геоблокированных доменов возвращают IP своего **SNI-прокси**. Прокси читает имя домена из TLS ClientHello и пересылает соединение через зарубежный сервер без расшифровки, поэтому сертификат остаётся оригинальным. Остальные домены резолвятся как обычно.
 
 Клиент:
 
@@ -45,6 +45,7 @@ GUI (Wails v3, без прав администратора) ──HTTP 127.0.0.
 | dnsai | `https://dns.dns-ai.ru/dns-query` | Только AI; работает только для IP из РФ/РБ |
 | mafioznik | `https://dns.mafioznik.xyz/dns-query` | **Только HTTP/2**; агрегатор, часть доменов отдаёт `0.0.0.0` |
 | bezmezhau | `https://dns.bezmezhau.com/dns-query` | Сервис для Беларуси: ChatGPT, Spotify, YouTube, Netflix и др.; по умолчанию выключен |
+| webshift | `https://d.webshiftvpn.ru/dns-query` | Бесплатный DNS проекта WebShift VPN: ChatGPT, Claude, Gemini, Grok, Notion, Xbox, Spotify и др.; проверен 16.10.2026; по умолчанию выключен |
 | cloudflare, google | — | Обычный DoH без обхода, эталон для проверки |
 
 ## Использование
