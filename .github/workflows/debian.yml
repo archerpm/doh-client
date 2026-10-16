@@ -35,6 +35,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Trust the checkout (the container runs as another user than the files' owner)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Test
         run: |
           TAGS=""; [ -n "${{ matrix.flavor }}" ] && TAGS="-tags ${{ matrix.flavor }}"
