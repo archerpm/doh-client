@@ -1,0 +1,111 @@
+name: build
+
+# Every push and pull request is built and tested on all three systems.
+# A tag like v1.1.0 additionally publishes the builds as a GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        shell: pwsh
+        run: |
+          if (gofmt -l .) { gofmt -l .; throw "gofmt" }
+          go vet ./...
+          go test ./...
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/doh-client-windows-*.exe
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # GTK4 / WebKitGTK 6.0: Ubuntu 24.04+, Fedora 40+
+          - runner: ubuntu-24.04
+            deps: libgtk-4-dev libwebkitgtk-6.0-dev
+            flavor: ""
+            name: linux-gtk4
+          # GTK3 / WebKit2GTK 4.1: Ubuntu 22.04, Debian 12 (built on 22.04 for its older glibc)
+          - runner: ubuntu-22.04
+            deps: libgtk-3-dev libwebkit2gtk-4.1-dev
+            flavor: gtk3
+            name: linux-gtk3
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config ${{ matrix.deps }}
+      - name: Test
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          TAGS=""; [ -n "${{ matrix.flavor }}" ] && TAGS="-tags ${{ matrix.flavor }}"
+          go vet $TAGS ./...
+          go test $TAGS ./...
+      - name: Build
+        run: ./scripts/build-linux.sh ${{ matrix.flavor }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/doh-client-linux-*
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+      - name: Build
+        run: ./scripts/build-macos.sh
+      - name: Pack
+        run: ditto -c -k --keepParent "dist/DoH Client.app" dist/DoH-Client-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/DoH-Client-macos.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        run: cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
