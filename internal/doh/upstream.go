@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/miekg/dns"
@@ -45,12 +46,38 @@ type Upstream struct {
 	hr     HostResolver
 	client *http.Client
 
+	timeout time.Duration
+
 	mu     sync.Mutex
 	lastOK netip.Addr               // IP that last worked, tried first
 	bad    map[netip.Addr]time.Time // IPs where TLS/HTTP failed after TCP connected
+
+	requests, conns, resumed, retries, failures atomic.Uint64
 }
 
 const badHold = 2 * time.Minute
+
+// maxConnsPerHost: HTTP/2 multiplexes queries over one connection, so more than a
+// few are never needed; without a limit a burst on a cold upstream (after sleep or a
+// network change) opens one TLS connection per query.
+const maxConnsPerHost = 4
+
+// retryDelay is the pause before a query is repeated after a connection error.
+var retryDelay = 100 * time.Millisecond
+
+// Stats are cumulative transport counters of one upstream.
+type Stats struct {
+	Requests uint64 `json:"requests"` // queries sent
+	Conns    uint64 `json:"conns"`    // TLS connections set up
+	Resumed  uint64 `json:"resumed"`  // of those, resumed from a cached session
+	Retries  uint64 `json:"retries"`  // queries repeated after a connection error
+	Failures uint64 `json:"failures"` // queries that failed for good
+}
+
+// Stats returns a snapshot of the transport counters.
+func (u *Upstream) Stats() Stats {
+	return Stats{u.requests.Load(), u.conns.Load(), u.resumed.Load(), u.retries.Load(), u.failures.Load()}
+}
 
 // Options configure an Upstream.
 type Options struct {
@@ -85,14 +112,32 @@ func New(o Options) (*Upstream, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 3 * time.Second
 	}
+	up.timeout = o.Timeout
 	tlsCfg := o.TLSConfig
 	if tlsCfg == nil {
 		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	tlsCfg = tlsCfg.Clone()
+	if tlsCfg.ClientSessionCache == nil {
+		// A reconnect after the idle timeout then resumes the session instead of a full handshake.
+		tlsCfg.ClientSessionCache = tls.NewLRUClientSessionCache(16)
+	}
+	prevVerify := tlsCfg.VerifyConnection
+	tlsCfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		up.conns.Add(1)
+		if cs.DidResume {
+			up.resumed.Add(1)
+		}
+		if prevVerify != nil {
+			return prevVerify(cs)
+		}
+		return nil
 	}
 	tr := &http.Transport{
 		DialContext:           up.dial,
 		TLSClientConfig:       tlsCfg,
 		ForceAttemptHTTP2:     true, // several providers (mafioznik, malw) reject HTTP/1.1
+		MaxConnsPerHost:       maxConnsPerHost,
 		MaxIdleConns:          8,
 		MaxIdleConnsPerHost:   4,
 		IdleConnTimeout:       25 * time.Second, // dns-ai closes idle connections at 30s
@@ -256,8 +301,37 @@ func (u *Upstream) race(ctx context.Context, ips []netip.Addr, port string) (net
 	return nil, errors.Join(errs...)
 }
 
+// transportError marks a failure of the connection itself (reset, EOF, refused),
+// as opposed to an answer the server gave and we did not like.
+type transportError struct{ error }
+
+func (e transportError) Unwrap() error { return e.error }
+
 // Exchange sends a query and returns the response with the original ID restored.
+// A connection error that shows up quickly (a stale pooled connection, a reset) is
+// retried once on a fresh connection to the same server: a DNS query is idempotent
+// and the client would otherwise see a SERVFAIL for a healthy provider.
 func (u *Upstream) Exchange(ctx context.Context, q *dns.Msg) (*dns.Msg, error) {
+	u.requests.Add(1)
+	start := time.Now()
+	r, err := u.exchangeOnce(ctx, q)
+	var te transportError
+	if err != nil && errors.As(err, &te) && ctx.Err() == nil && time.Since(start) < u.timeout/3 {
+		u.retries.Add(1)
+		// a short pause: a provider that drops connections under load needs a moment too
+		select {
+		case <-time.After(retryDelay):
+			r, err = u.exchangeOnce(ctx, q)
+		case <-ctx.Done():
+		}
+	}
+	if err != nil {
+		u.failures.Add(1)
+	}
+	return r, err
+}
+
+func (u *Upstream) exchangeOnce(ctx context.Context, q *dns.Msg) (*dns.Msg, error) {
 	m := q.Copy()
 	m.Id = 0 // RFC 8484 §4.1: ID SHOULD be 0 for cache friendliness
 	wire, err := m.Pack()
@@ -289,7 +363,7 @@ func (u *Upstream) Exchange(ctx context.Context, q *dns.Msg) (*dns.Msg, error) {
 		if !errors.Is(ctx.Err(), context.Canceled) {
 			u.markBad()
 		}
-		return nil, err
+		return nil, transportError{err}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespSize+1))

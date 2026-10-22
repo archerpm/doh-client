@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -192,5 +195,90 @@ func TestBadAddressDemoted(t *testing.T) {
 	ips, _ = u.addrs(context.Background(), u.host)
 	if ips[len(ips)-1] != u.static[0] {
 		t.Fatalf("demoted address should be last: %v", ips)
+	}
+}
+
+func ask1(t *testing.T, u *Upstream, name string) error {
+	t.Helper()
+	q := new(dns.Msg)
+	q.SetQuestion(dns.Fqdn(name), dns.TypeA)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := u.Exchange(ctx, q)
+	return err
+}
+
+// A reconnect after the idle timeout resumes the TLS session instead of a full handshake.
+func TestSessionResumedAfterReconnect(t *testing.T) {
+	u := up(t, newServer(t, true, answer), false)
+	defer u.Close()
+	if err := ask1(t, u, "a.test"); err != nil {
+		t.Fatal(err)
+	}
+	u.client.CloseIdleConnections() // what IdleConnTimeout does after a quiet spell
+	time.Sleep(50 * time.Millisecond)
+	if err := ask1(t, u, "b.test"); err != nil {
+		t.Fatal(err)
+	}
+	if s := u.Stats(); s.Conns != 2 || s.Resumed != 1 {
+		t.Fatalf("want 2 connections, 1 resumed; got %+v", s)
+	}
+}
+
+// A burst on a cold upstream shares a few connections instead of opening one per query.
+func TestColdBurstSharesConnections(t *testing.T) {
+	u := up(t, newServer(t, true, func(q *dns.Msg) *dns.Msg { time.Sleep(30 * time.Millisecond); return answer(q) }), false)
+	defer u.Close()
+	var wg sync.WaitGroup
+	var failed atomic.Int32
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := ask1(t, u, "h"+strconv.Itoa(i)+".test"); err != nil {
+				failed.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if failed.Load() != 0 {
+		t.Fatalf("%d queries failed", failed.Load())
+	}
+	if s := u.Stats(); s.Conns > maxConnsPerHost {
+		t.Fatalf("burst opened %d connections, limit %d", s.Conns, maxConnsPerHost)
+	}
+}
+
+// A connection that breaks mid-query is retried once and the caller sees an answer.
+func TestRetryAfterBrokenConnection(t *testing.T) {
+	var calls atomic.Int32
+	u := up(t, newServer(t, true, func(q *dns.Msg) *dns.Msg {
+		if calls.Add(1) == 1 {
+			panic(http.ErrAbortHandler) // the server drops the request
+		}
+		return answer(q)
+	}), false)
+	defer u.Close()
+	if err := ask1(t, u, "retry.test"); err != nil {
+		t.Fatalf("the query should have been retried: %v", err)
+	}
+	if s := u.Stats(); s.Retries != 1 || s.Failures != 0 {
+		t.Fatalf("want 1 retry, 0 failures; got %+v", s)
+	}
+}
+
+// An HTTP error is the server's answer, not a broken connection: no retry.
+func TestNoRetryOnHTTPError(t *testing.T) {
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", 400) }))
+	s.EnableHTTP2 = true
+	s.StartTLS()
+	defer s.Close()
+	u := up(t, s, false)
+	defer u.Close()
+	if err := ask1(t, u, "x.test"); err == nil {
+		t.Fatal("expected an error")
+	}
+	if st := u.Stats(); st.Retries != 0 || st.Failures != 1 {
+		t.Fatalf("HTTP 400 must not be retried: %+v", st)
 	}
 }
