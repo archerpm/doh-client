@@ -368,7 +368,7 @@ func (u *Upstream) exchangeOnce(ctx context.Context, q *dns.Msg) (*dns.Msg, erro
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespSize+1))
 	if err != nil {
-		return nil, err
+		return nil, transportError{err} // the connection broke mid-answer: worth one more try
 	}
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode >= 500 {

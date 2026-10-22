@@ -470,3 +470,46 @@ func TestCacheGetStaleBoundaries(t *testing.T) {
 		t.Fatalf("an over-age entry must be dropped, len=%d", c.Len())
 	}
 }
+
+// A final answer that cannot be cached (TTL 0) replaces the old one: it must not
+// come back as a stale answer when the provider fails afterwards.
+func TestStaleDroppedAfterUncacheableAnswer(t *testing.T) {
+	var mode atomic.Int32 // 0 = normal, 1 = TTL 0, 2 = down
+	g := &fake{fn: func(q *dns.Msg) (*dns.Msg, error) {
+		switch mode.Load() {
+		case 1:
+			return aResp(q, "8.8.8.8", 0), nil
+		case 2:
+			return nil, errors.New("connection reset")
+		}
+		return aResp(q, "9.9.9.9", 300), nil
+	}}
+	r := setup(t, map[string]*fake{"g": g}, func(c *config.Config) { c.ActiveProvider = "g" })
+	now := time.Unix(5000, 0)
+	r.cache.now = func() time.Time { return now }
+	ask := func() *dns.Msg { return r.Resolve(context.Background(), query("a.com", dns.TypeA), "c") }
+	ask() // cached with 300 s
+	now = now.Add(10 * time.Minute)
+	mode.Store(1)
+	ask() // the provider now says TTL 0: not cacheable, but it is the current truth
+	mode.Store(2)
+	if m := ask(); m.Rcode != dns.RcodeServerFailure {
+		t.Fatalf("the replaced answer came back as stale: %v", m)
+	}
+}
+
+func TestStaleDoesNotVouchForDNSSEC(t *testing.T) {
+	c := NewCache(4)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	m := aResp(query("a.com", dns.TypeA), "1.1.1.1", 100)
+	m.AuthenticatedData = true
+	c.Put("k", m, 0, 3600)
+	if got, ok := c.Get("k"); !ok || !got.AuthenticatedData {
+		t.Fatal("a live answer keeps AD")
+	}
+	now = now.Add(200 * time.Second)
+	if got, ok := c.GetStale("k"); !ok || got.AuthenticatedData {
+		t.Fatalf("a stale answer must not claim AD: %v %v", got, ok)
+	}
+}

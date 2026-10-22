@@ -282,3 +282,33 @@ func TestNoRetryOnHTTPError(t *testing.T) {
 		t.Fatalf("HTTP 400 must not be retried: %+v", st)
 	}
 }
+
+// The connection breaks after the headers and a part of the body: also retried.
+func TestRetryAfterBrokenBody(t *testing.T) {
+	var calls atomic.Int32
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		q := new(dns.Msg)
+		_ = q.Unpack(body)
+		wire, _ := answer(q).Pack()
+		w.Header().Set("Content-Type", mimeDNS)
+		w.Header().Set("Content-Length", strconv.Itoa(len(wire)))
+		if calls.Add(1) == 1 {
+			_, _ = w.Write(wire[:len(wire)/2])
+			w.(http.Flusher).Flush()
+			panic(http.ErrAbortHandler) // cut the body short
+		}
+		_, _ = w.Write(wire)
+	}))
+	s.EnableHTTP2 = true
+	s.StartTLS()
+	defer s.Close()
+	u := up(t, s, false)
+	defer u.Close()
+	if err := ask1(t, u, "body.test"); err != nil {
+		t.Fatalf("a cut body should have been retried: %v", err)
+	}
+	if st := u.Stats(); st.Retries != 1 {
+		t.Fatalf("want 1 retry: %+v", st)
+	}
+}

@@ -130,13 +130,17 @@ var netshRetryDelay = 700 * time.Millisecond
 
 // netshSet applies the servers with one more try after a short pause.
 func netshSet(family string, idx uint32, servers []string) error {
+	start := time.Now()
 	err := netshSetOnce(family, idx, servers)
-	if err == nil {
-		return nil
+	if err == nil || time.Since(start) > netshRetryWithin {
+		return err // a hung netsh is not tried again: that would only double the wait
 	}
 	time.Sleep(netshRetryDelay)
 	return netshSetOnce(family, idx, servers)
 }
+
+// netshRetryWithin: only a failure that came back this fast is tried once more.
+const netshRetryWithin = 5 * time.Second
 
 func netshSetOnce(family string, idx uint32, servers []string) error {
 	name := "name=" + strconv.FormatUint(uint64(idx), 10)

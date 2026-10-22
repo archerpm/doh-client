@@ -266,6 +266,15 @@ func (r *Router) cacheAnswer(st *state, gen uint64, key string, m *dns.Msg) {
 	}
 }
 
+// invalidate drops the cached answer for key (a newer final answer replaced it).
+func (r *Router) invalidate(gen uint64, key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gen.Load() == gen {
+		r.cache.Delete(key)
+	}
+}
+
 // errConfigChanged: Apply swapped the state between the snapshot and the exchange.
 var errConfigChanged = errors.New("configuration changed")
 
@@ -436,6 +445,7 @@ func (r *Router) exchangeChain(ctx context.Context, st *state, q *dns.Msg, chain
 		}
 		if isRule && isSinkhole(m) {
 			// Provider refuses this domain (e.g. mafioznik returns 0.0.0.0): try the next one.
+			r.invalidate(gen, key) // and an older answer must not come back as a stale one
 			errs = append(errs, fmt.Errorf("%s: blocked answer", id))
 			if lastMsg == nil || lastMsg.Rcode != dns.RcodeSuccess {
 				lastMsg, lastProv = m, id

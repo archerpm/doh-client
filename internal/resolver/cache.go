@@ -93,6 +93,16 @@ func (c *Cache) Get(key string) (*dns.Msg, bool) {
 	return m, true
 }
 
+// Delete drops the entry for key, if any.
+func (c *Cache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.items[key]; ok {
+		c.ll.Remove(el)
+		delete(c.items, key)
+	}
+}
+
 // GetStale returns an expired answer for use when the provider cannot be reached
 // (RFC 8767): records carry a short TTL so that clients ask again soon. Nothing
 // older than maxStale past its expiry is returned.
@@ -110,6 +120,8 @@ func (c *Cache) GetStale(key string) (*dns.Msg, bool) {
 		return nil, false
 	}
 	m := it.msg.Copy()
+	// The signatures may have expired too: do not vouch for the data (AD) any more.
+	m.AuthenticatedData = false
 	for _, sec := range [][]dns.RR{m.Answer, m.Ns, m.Extra} {
 		for _, rr := range sec {
 			if h := rr.Header(); h.Rrtype != dns.TypeOPT {
@@ -127,6 +139,9 @@ func (c *Cache) Put(key string, m *dns.Msg, minTTL, maxTTL uint32) {
 	}
 	ttl, ok := msgTTL(m)
 	if !ok || ttl == 0 { // TTL 0 means "do not cache"; MinTTL must not override it
+		// A final answer that cannot be kept still replaces the old one: the old one
+		// must not come back later as a "stale" answer.
+		c.Delete(key)
 		return
 	}
 	neg := m.Rcode == dns.RcodeNameError || !hasType(m)
