@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -124,7 +125,20 @@ func writeStatic(v6 bool, guid string, servers []string) error {
 	return k.SetStringValue("NameServer", strings.Join(servers, ","))
 }
 
+// netshRetryDelay: right after a switch (DHCP renew, link flap) an adapter is often busy for a moment.
+var netshRetryDelay = 700 * time.Millisecond
+
+// netshSet applies the servers with one more try after a short pause.
 func netshSet(family string, idx uint32, servers []string) error {
+	err := netshSetOnce(family, idx, servers)
+	if err == nil {
+		return nil
+	}
+	time.Sleep(netshRetryDelay)
+	return netshSetOnce(family, idx, servers)
+}
+
+func netshSetOnce(family string, idx uint32, servers []string) error {
 	name := "name=" + strconv.FormatUint(uint64(idx), 10)
 	if len(servers) == 0 {
 		_, err := run("netsh", "interface", family, "set", "dnsservers", name, "source=dhcp")
@@ -176,12 +190,12 @@ func (winDNS) ensure(servers []string, b *Backup, save func() error) ([]string, 
 		cur4 := staticServers(false, a.guid)
 		if !equalSet(cur4, v4) {
 			if err := netshSet("ipv4", a.idx4, v4); err != nil {
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("адаптер %q (ipv4): %w", a.name, err))
 			}
 		}
 		if a.idx6 != 0 && len(v6) > 0 && !equalSet(staticServers(true, a.guid), v6) {
 			if err := netshSet("ipv6", a.idx6, v6); err != nil {
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("адаптер %q (ipv6): %w", a.name, err))
 			}
 		}
 	}
@@ -212,11 +226,11 @@ func (winDNS) restore(b *Backup) error {
 			continue
 		}
 		if err := netshSet("ipv4", a.idx4, it.V4); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("адаптер %q (ipv4): %w", it.Name, err))
 		}
 		if a.idx6 != 0 {
 			if err := netshSet("ipv6", a.idx6, it.V6); err != nil {
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("адаптер %q (ipv6): %w", it.Name, err))
 			}
 		}
 	}
