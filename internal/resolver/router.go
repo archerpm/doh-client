@@ -69,6 +69,8 @@ type Stats struct {
 	Failures  atomic.Uint64
 	RuleHits  atomic.Uint64
 	Blocked   atomic.Uint64 // synthesized empty answers (AAAA/HTTPS for rule domains)
+
+	StaleServed atomic.Uint64 // expired cached answers given because the provider failed
 }
 
 // StatsSnapshot is a JSON-friendly copy of Stats.
@@ -79,6 +81,8 @@ type StatsSnapshot struct {
 	RuleHits  uint64 `json:"rule_hits"`
 	Blocked   uint64 `json:"blocked"`
 	CacheSize int    `json:"cache_size"`
+
+	StaleServed uint64 `json:"stale_served"`
 }
 
 // New creates a router; call Apply before use.
@@ -346,6 +350,22 @@ func (r *Router) resolveOnce(ctx context.Context, q *dns.Msg) Result {
 	case <-ctx.Done():
 		return Result{Msg: reply(q, dns.RcodeServerFailure), Rule: ruleDom, Err: ctx.Err()}
 	}
+	// The provider could not be reached: an expired answer beats SERVFAIL (RFC 8767).
+	if res.Err != nil && res.Msg != nil && res.Msg.Rcode == dns.RcodeServerFailure {
+		r.mu.Lock()
+		var stale *dns.Msg
+		var ok bool
+		if r.gen.Load() == gen {
+			stale, ok = r.cache.GetStale(key)
+		}
+		r.mu.Unlock()
+		if ok {
+			r.stats.StaleServed.Add(1)
+			stale.Id = q.Id
+			stale.Question = []dns.Question{qq}
+			return Result{Msg: stale, Rule: ruleDom, Cached: true, Provider: "cache-stale", Tried: res.Tried}
+		}
+	}
 	if res.Msg != nil {
 		res.Msg.Id = q.Id
 		res.Msg.Question = []dns.Question{qq}
@@ -503,11 +523,25 @@ func (r *Router) Stats() StatsSnapshot {
 	return StatsSnapshot{
 		Queries: r.stats.Queries.Load(), CacheHits: r.stats.CacheHits.Load(), Failures: r.stats.Failures.Load(),
 		RuleHits: r.stats.RuleHits.Load(), Blocked: r.stats.Blocked.Load(), CacheSize: r.cache.Len(),
+		StaleServed: r.stats.StaleServed.Load(),
 	}
 }
 
-// Health returns provider health.
-func (r *Router) Health() []HealthInfo { return r.health.Snapshot() }
+// Health returns provider health, with the transport counters of each upstream
+// (since the tunnel was selected) when the upstream keeps them.
+func (r *Router) Health() []HealthInfo {
+	hs := r.health.Snapshot()
+	if st := r.st.Load(); st != nil {
+		for i := range hs {
+			if u := st.upstreams[hs[i].ID]; u != nil {
+				if s, ok := u.ex.(interface{ Stats() doh.Stats }); ok {
+					hs[i].Transport = s.Stats()
+				}
+			}
+		}
+	}
+	return hs
+}
 
 // Log returns log entries after seq.
 func (r *Router) Log(after uint64, limit int) []Entry { return r.log.After(after, limit) }

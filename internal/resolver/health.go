@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/archerpm/doh-client/internal/doh"
 )
 
 const downAfterFails = 3
@@ -20,6 +22,9 @@ type HealthInfo struct {
 	LastError string    `json:"last_error,omitempty"`
 	LastCheck time.Time `json:"last_check"`
 	Checked   bool      `json:"checked"`
+
+	// Transport counts connections, resumed TLS sessions, retries and failed queries.
+	Transport doh.Stats `json:"transport"`
 }
 
 type health struct {

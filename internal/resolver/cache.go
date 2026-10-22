@@ -9,7 +9,11 @@ import (
 	"github.com/miekg/dns"
 )
 
-const maxNegTTL = 300
+const (
+	maxNegTTL = 300
+	staleTTL  = 30            // RFC 8767 §5.11: TTL of an answer served past its expiry
+	maxStale  = 1 * time.Hour // how long past its expiry an answer may still be served
+)
 
 // Cache is a TTL-aware LRU of DNS responses.
 type Cache struct {
@@ -60,8 +64,11 @@ func (c *Cache) Get(key string) (*dns.Msg, bool) {
 	it := el.Value.(*cacheItem)
 	now := c.now()
 	if !now.Before(it.exp) {
-		c.ll.Remove(el)
-		delete(c.items, key)
+		// An expired answer is no hit, but it stays for GetStale until maxStale has passed.
+		if now.Sub(it.exp) > maxStale {
+			c.ll.Remove(el)
+			delete(c.items, key)
+		}
 		return nil, false
 	}
 	c.ll.MoveToFront(el)
@@ -83,6 +90,33 @@ func (c *Cache) Get(key string) (*dns.Msg, bool) {
 	adjust(m.Answer)
 	adjust(m.Ns)
 	adjust(m.Extra)
+	return m, true
+}
+
+// GetStale returns an expired answer for use when the provider cannot be reached
+// (RFC 8767): records carry a short TTL so that clients ask again soon. Nothing
+// older than maxStale past its expiry is returned.
+func (c *Cache) GetStale(key string) (*dns.Msg, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.items[key]
+	if !ok {
+		return nil, false
+	}
+	it := el.Value.(*cacheItem)
+	if c.now().Sub(it.exp) > maxStale {
+		c.ll.Remove(el)
+		delete(c.items, key)
+		return nil, false
+	}
+	m := it.msg.Copy()
+	for _, sec := range [][]dns.RR{m.Answer, m.Ns, m.Extra} {
+		for _, rr := range sec {
+			if h := rr.Header(); h.Rrtype != dns.TypeOPT {
+				h.Ttl = staleTTL
+			}
+		}
+	}
 	return m, true
 }
 

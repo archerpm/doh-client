@@ -405,3 +405,68 @@ func TestBadVersBeatsRuleSuppression(t *testing.T) {
 		t.Fatal("the provider was asked for a request that is refused")
 	}
 }
+
+// An expired answer is served (with a short TTL) while the provider cannot be reached,
+// but not forever and not for names that were never cached.
+func TestStaleAnswerWhenProviderFails(t *testing.T) {
+	var down atomic.Bool
+	g := &fake{fn: func(q *dns.Msg) (*dns.Msg, error) {
+		if down.Load() {
+			return nil, errors.New("connection reset")
+		}
+		return aResp(q, "9.9.9.9", 300), nil
+	}}
+	r := setup(t, map[string]*fake{"g": g}, func(c *config.Config) { c.ActiveProvider = "g" })
+	now := time.Unix(5000, 0)
+	r.cache.now = func() time.Time { return now }
+	ask := func(name string) *dns.Msg { return r.Resolve(context.Background(), query(name, dns.TypeA), "c") }
+
+	if m := ask("a.com"); m.Rcode != dns.RcodeSuccess {
+		t.Fatalf("first answer: %v", m)
+	}
+	down.Store(true)
+	now = now.Add(10 * time.Minute) // past the 300 s TTL
+	m := ask("a.com")
+	if m.Rcode != dns.RcodeSuccess || len(m.Answer) != 1 || m.Answer[0].Header().Ttl != staleTTL {
+		t.Fatalf("expected a stale answer with TTL %d, got %v", staleTTL, m)
+	}
+	if got := r.Stats().StaleServed; got != 1 {
+		t.Fatalf("StaleServed = %d", got)
+	}
+	if m := ask("never-cached.com"); m.Rcode != dns.RcodeServerFailure {
+		t.Fatalf("a name that was never cached must fail, got rcode %d", m.Rcode)
+	}
+	now = now.Add(2 * time.Hour) // far past maxStale
+	if m := ask("a.com"); m.Rcode != dns.RcodeServerFailure {
+		t.Fatalf("an answer older than maxStale must not be served, got rcode %d", m.Rcode)
+	}
+	down.Store(false)
+	if m := ask("a.com"); m.Rcode != dns.RcodeSuccess || m.Answer[0].Header().Ttl == staleTTL {
+		t.Fatalf("a live provider must be asked again: %v", m)
+	}
+}
+
+func TestCacheGetStaleBoundaries(t *testing.T) {
+	c := NewCache(8)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	q := query("a.com", dns.TypeA)
+	c.Put("k", aResp(q, "1.1.1.1", 100), 0, 3600)
+	if _, ok := c.GetStale("k"); !ok {
+		t.Fatal("a fresh entry is also available as stale")
+	}
+	now = now.Add(100*time.Second + maxStale - time.Second)
+	if _, ok := c.Get("k"); ok {
+		t.Fatal("expired entry must not be a normal hit")
+	}
+	if m, ok := c.GetStale("k"); !ok || m.Answer[0].Header().Ttl != staleTTL {
+		t.Fatalf("within maxStale: %v %v", m, ok)
+	}
+	now = now.Add(2 * time.Second)
+	if _, ok := c.GetStale("k"); ok {
+		t.Fatal("beyond maxStale")
+	}
+	if c.Len() != 0 {
+		t.Fatalf("an over-age entry must be dropped, len=%d", c.Len())
+	}
+}
